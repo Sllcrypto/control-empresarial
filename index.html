@@ -48,7 +48,6 @@ const sb = window.supabase.createClient(SB_URL, SB_KEY);
 function fmtDate(d){if(!d)return"—";const[y,m,day]=d.split("-");return`${day}/${m}/${y}`;}
 function fmtHora(ts){if(!ts)return"—";return new Date(ts).toLocaleTimeString("es-CR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});}
 function fmtFecha(ts){if(!ts)return"—";return new Date(ts).toLocaleDateString("es-CR",{day:"2-digit",month:"2-digit",year:"numeric"});}
-function duracion(ini){const ms=Date.now()-ini;const m=Math.floor(ms/60000);const s=Math.floor((ms%60000)/1000);return`${m}m ${s.toString().padStart(2,"0")}s`;}
 function pasado(ts){return(Date.now()-ts)>LIMITE_CAFE*60*1000;}
 function durToMin(dur){
   if(!dur)return 0;
@@ -76,6 +75,11 @@ function minToDur(min){
 }
 function ls(k,fb){try{const d=localStorage.getItem(k);return d?JSON.parse(d):fb;}catch{return fb;}}
 function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
+function abrirWhatsApp(telefono,mensaje){
+  const num=telefono?telefono.replace(/[^0-9]/g,""):"";
+  const url=num?`https://wa.me/506${num}?text=${encodeURIComponent(mensaje)}`:`https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+  window.open(url,"_blank","noopener,noreferrer");
+}
 
 const COLABS_INIT = [
   {id:1,nombre:"Padilla Rosales Allan",area:"Administrativa",diasAcumulados:10,telefono:""},
@@ -145,10 +149,9 @@ function App(){
   const [view,setView]=useState("dashboard");
   const [colabs,setColabs]=useState(()=>ls("ce_colabs",COLABS_INIT));
   const [registros,setRegistros]=useState(()=>ls("ce_regs",REGS_INIT));
-  const [permisos,setPermisos]=useState([]);
-  const [activos,setActivos]=useState({});
+  const [permisos,setPermisos]=useState(()=>ls("ce_permisos",[]));
+  const [activos,setActivos]=useState(()=>ls("ce_activos",{}));
   const [histCafe,setHistCafe]=useState(()=>ls("ce_hist_cafe",[]));
-  const [tick,setTick]=useState(0);
 
   // UI vacaciones
   const [showRegForm,setShowRegForm]=useState(false);
@@ -176,16 +179,14 @@ function App(){
   const [showIncapForm,setShowIncapForm]=useState(false);
   const [incapEdit,setIncapEdit]=useState(null);
   const [incapForm,setIncapForm]=useState({colabId:"",fechaInicio:"",fechaFin:"",tipo:"Enfermedad",detalle:""});
-  const [tiempoExtra,setTiempoExtra]=useState([]);
+  const [tiempoExtra,setTiempoExtra]=useState(()=>ls("ce_textra",[]));
   const [showExtraForm,setShowExtraForm]=useState(false);
   const [extraEdit,setExtraEdit]=useState(null);
   const [extraForm,setExtraForm]=useState({colabId:"",fecha:new Date().toISOString().split("T")[0],duracion:"",motivo:"",detalle:""});
-  const [showReposExtraForm,setShowReposExtraForm]=useState(null);
-  const [reposExtraForm,setReposExtraForm]=useState({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});
   const [permisoTab,setPermisoTab]=useState("salida");
   const [sbOnline,setSbOnline]=useState(false);
   const [cargando,setCargando]=useState(true);
-  const [showReposForm,setShowReposForm]=useState(null); // id del permiso
+  const [showReposForm,setShowReposForm]=useState(null); // {tipo:"permisos"|"tiempo_extra", parentId} | null
   const [reposForm,setReposForm]=useState({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});
   const [permisoEdit,setPermisoEdit]=useState(null);
   const [permisoForm,setPermisoForm]=useState({colabId:"",fecha:new Date().toISOString().split("T")[0],duracion:"",motivo:"Médico",detalle:""});
@@ -195,8 +196,6 @@ function App(){
   const [cafeView,setCafeView]=useState("control");
   const [cafeBusqueda,setCafeBusqueda]=useState("");
   const [showBorrarHist,setShowBorrarHist]=useState(false);
-
-  useEffect(()=>{const t=setInterval(()=>setTick(x=>x+1),1000);return()=>clearInterval(t);},[]);
 
   // Acumulación mensual
   // Realtime colaboradores
@@ -417,13 +416,13 @@ function App(){
   function detectConflicto(form,excId=null){
     const colab=colabs.find(c=>c.id===parseInt(form.colabId));
     if(!colab||!form.fechaInicio||!form.fechaFin)return null;
-    const ini=new Date(form.fechaInicio),fin=new Date(form.fechaFin);
+    const ini=new Date(form.fechaInicio+"T00:00:00"),fin=new Date(form.fechaFin+"T00:00:00");
     const msgs=[];
     for(const r of registros){
       if(r.id===excId)continue;
       const otro=colabs.find(c=>c.id===r.colabId);
       if(!otro||otro.area!==colab.area||otro.id===colab.id)continue;
-      const rI=new Date(r.fechaInicio),rF=new Date(r.fechaFin);
+      const rI=new Date(r.fechaInicio+"T00:00:00"),rF=new Date(r.fechaFin+"T00:00:00");
       if(ini<=rF&&fin>=rI){const esRes=r.estado==="reservado";msgs.push(esRes?`📌 Reserva en ${colab.area}: ${otro.nombre} (${fmtDate(r.fechaInicio)} al ${fmtDate(r.fechaFin)}) — sin confirmar.`:`⚠️ Choque en ${colab.area}: ${otro.nombre} del ${fmtDate(r.fechaInicio)} al ${fmtDate(r.fechaFin)}.`);}
     }
     return msgs.length>0?msgs.join("\n"):null;
@@ -431,8 +430,10 @@ function App(){
 
   async function saveReg(force=false){
     if(!regForm.colabId||!regForm.boleta||!regForm.fechaInicio||!regForm.fechaFin||!regForm.dias)return;
+    const diasNum=parseInt(regForm.dias,10);
+    if(isNaN(diasNum)||diasNum<=0){alert("El número de días no es válido.");return;}
     if(!force){const c=detectConflicto(regForm,regEdit);if(c){setConflicto(c);return;}}
-    const data={colabId:parseInt(regForm.colabId),boleta:regForm.boleta,fechaInicio:regForm.fechaInicio,fechaFin:regForm.fechaFin,mes:regForm.mes,dias:parseInt(regForm.dias),estado:regForm.estado||"confirmado",historico:false,rrhh:false};
+    const data={colabId:parseInt(regForm.colabId),boleta:regForm.boleta,fechaInicio:regForm.fechaInicio,fechaFin:regForm.fechaFin,mes:regForm.mes,dias:diasNum,estado:regForm.estado||"confirmado",historico:false,rrhh:false};
     if(regEdit!==null){
       if(sbOnline)await sb.from("registros").update({colab_id:data.colabId,boleta:data.boleta,fecha_inicio:data.fechaInicio,fecha_fin:data.fechaFin,mes:data.mes,dias:data.dias,estado:data.estado}).eq("id",regEdit);
       svRegs(registros.map(r=>r.id===regEdit?{...r,...data,id:regEdit}:r));
@@ -463,8 +464,7 @@ function App(){
     const rest=saldo(c);
     const boletas=registros.filter(r=>r.colabId===c.id&&!r.historico).map(r=>`  • Boleta #${r.boleta}: ${fmtDate(r.fechaInicio)} al ${fmtDate(r.fechaFin)} (${r.dias} día(s) — ${r.estado})`).join("\n");
     const msg=`Hola ${c.nombre.split(" ")[0]} 👋\n\n*Resumen de Vacaciones*\n\n🟢 Días disponibles: *${rest}*\n\n📋 Boletas utilizadas:\n${boletas||"  Sin registros nuevos."}`;
-    const num=c.telefono?c.telefono.replace(/[^0-9]/g,""):"";
-    window.open(num?`https://wa.me/506${num}?text=${encodeURIComponent(msg)}`:`https://wa.me/?text=${encodeURIComponent(msg)}`,"_blank");
+    abrirWhatsApp(c.telefono,msg);
   }
 
   function waPermisos(c){
@@ -472,14 +472,13 @@ function App(){
     if(perm.length===0){alert("Este colaborador no tiene permisos registrados.");return;}
     const lista=perm.map((p,i)=>`${i+1}. ${p.fecha} — ${p.motivo} — Duración: ${p.duracion}${p.detalle?`\n   Detalle: ${p.detalle}`:""}`).join("\n\n");
     const msg=`Hola ${c.nombre.split(" ")[0]} 👋\n\n*Historial de Permisos Especiales*\n\n${lista}`;
-    const num=c.telefono?c.telefono.replace(/[^0-9]/g,""):"";
-    window.open(num?`https://wa.me/506${num}?text=${encodeURIComponent(msg)}`:`https://wa.me/?text=${encodeURIComponent(msg)}`,"_blank");
+    abrirWhatsApp(c.telefono,msg);
   }
 
   // Permisos
   function calcDias(ini,fin){
     if(!ini||!fin)return 0;
-    const d1=new Date(ini),d2=new Date(fin);
+    const d1=new Date(ini+"T00:00:00"),d2=new Date(fin+"T00:00:00");
     return Math.max(0,Math.round((d2-d1)/(1000*60*60*24))+1);
   }
 
@@ -515,35 +514,51 @@ function App(){
       return i.detalle?linea+"\n   "+i.detalle:linea;
     }).join("\n\n");
     const msg="Hola "+c.nombre.split(" ")[0]+" 👋\n\n*Historial de Incapacidades*\n\n"+lista;
-    const num=c.telefono?c.telefono.replace(/[^0-9]/g,""):"";
-    window.open(num?"https://wa.me/506"+num+"?text="+encodeURIComponent(msg):"https://wa.me/?text="+encodeURIComponent(msg),"_blank");
+    abrirWhatsApp(c.telefono,msg);
   }
 
-  async function saveExtraReposicion(){
-    if(!showReposExtraForm)return;
-    const mins=durToMin(reposExtraForm.duracion);
+  const REPOS_TABLA={permisos:"permisos",tiempo_extra:"tiempo_extra"};
+  function listaRepos(tipo){return tipo==="permisos"?permisos:tiempoExtra;}
+  function setListaRepos(tipo){return tipo==="permisos"?svPermisos:svTiempoExtra;}
+
+  function abrirReposForm(tipo,parentId,r=null){
+    setShowReposForm({tipo,parentId});
+    setReposForm({fecha:r?r.fecha:new Date().toISOString().split("T")[0],duracion:r?r.texto:"",reposEditId:r?r.id:null});
+  }
+  function cerrarReposForm(){
+    setShowReposForm(null);
+    setReposForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});
+  }
+
+  async function saveReposicion(){
+    if(!showReposForm)return;
+    const {tipo,parentId}=showReposForm;
+    const mins=durToMin(reposForm.duracion);
     if(mins<=0)return;
-    const rep={id:reposExtraForm.reposEditId||Date.now(),fecha:reposExtraForm.fecha,minutos:mins,texto:minToDur(mins)};
-    const nuevoExtra=tiempoExtra.map(t=>{
-      if(t.id!==showReposExtraForm)return t;
-      const reps=t.reposiciones||[];
-      if(reposExtraForm.reposEditId){
-        return{...t,reposiciones:reps.map(r=>r.id===reposExtraForm.reposEditId?rep:r)};
+    const rep={id:reposForm.reposEditId||Date.now(),fecha:reposForm.fecha,minutos:mins,texto:minToDur(mins)};
+    const lista=listaRepos(tipo);
+    const nuevaLista=lista.map(item=>{
+      if(item.id!==parentId)return item;
+      const reps=item.reposiciones||[];
+      if(reposForm.reposEditId){
+        return{...item,reposiciones:reps.map(r=>r.id===reposForm.reposEditId?rep:r)};
       }
-      return{...t,reposiciones:[...reps,rep]};
+      return{...item,reposiciones:[...reps,rep]};
     });
-    svTiempoExtra(nuevoExtra);
-    const extraActualizado=nuevoExtra.find(t=>t.id===showReposExtraForm);
-    if(extraActualizado)await syncRepos(showReposExtraForm,extraActualizado.reposiciones,"tiempo_extra");
-    setShowReposExtraForm(null);
-    setReposExtraForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});
+    setListaRepos(tipo)(nuevaLista);
+    const actualizado=nuevaLista.find(item=>item.id===parentId);
+    if(actualizado)await syncRepos(parentId,actualizado.reposiciones,REPOS_TABLA[tipo]);
+    cerrarReposForm();
   }
-  async function deleteExtraReposicion(extraId,repId){
-    const nuevoExtra=tiempoExtra.map(t=>t.id===extraId?{...t,reposiciones:(t.reposiciones||[]).filter(r=>r.id!==repId)}:t);
-    svTiempoExtra(nuevoExtra);
-    const extraActualizado=nuevoExtra.find(t=>t.id===extraId);
-    if(extraActualizado)await syncRepos(extraId,extraActualizado.reposiciones,"tiempo_extra");
+
+  async function deleteReposicion(tipo,parentId,repId){
+    const lista=listaRepos(tipo);
+    const nuevaLista=lista.map(item=>item.id===parentId?{...item,reposiciones:(item.reposiciones||[]).filter(r=>r.id!==repId)}:item);
+    setListaRepos(tipo)(nuevaLista);
+    const actualizado=nuevaLista.find(item=>item.id===parentId);
+    if(actualizado)await syncRepos(parentId,actualizado.reposiciones,REPOS_TABLA[tipo]);
   }
+
   async function saveExtra(){
     if(!extraForm.colabId||!extraForm.duracion||!extraForm.fecha)return;
     const data={...extraForm,colabId:parseInt(extraForm.colabId)};
@@ -558,33 +573,6 @@ function App(){
   }
   function resetExtraForm(){setExtraForm({colabId:"",fecha:new Date().toISOString().split("T")[0],duracion:"",motivo:"",detalle:""});setShowExtraForm(false);setExtraEdit(null);}
   function editExtra(t){setExtraForm({colabId:String(t.colabId),fecha:t.fecha,duracion:t.duracion,motivo:t.motivo||"",detalle:t.detalle||""});setExtraEdit(t.id);setShowExtraForm(true);}
-  async function saveReposicion(){
-    if(!showReposForm)return;
-    const mins=durToMin(reposForm.duracion);
-    if(mins<=0)return;
-    const rep={id:reposForm.reposEditId||Date.now(),fecha:reposForm.fecha,minutos:mins,texto:minToDur(mins)};
-    const nuevosPermisos=permisos.map(p=>{
-      if(p.id!==showReposForm)return p;
-      const reps=p.reposiciones||[];
-      if(reposForm.reposEditId){
-        return{...p,reposiciones:reps.map(r=>r.id===reposForm.reposEditId?rep:r)};
-      }
-      return{...p,reposiciones:[...reps,rep]};
-    });
-    svPermisos(nuevosPermisos);
-    const permisoActualizado=nuevosPermisos.find(p=>p.id===showReposForm);
-    if(permisoActualizado)await syncRepos(showReposForm,permisoActualizado.reposiciones,"permisos");
-    setShowReposForm(null);
-    setReposForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});
-  }
-
-  async function deleteReposicion(permisoId,repId){
-    const nuevosPermisos=permisos.map(p=>p.id===permisoId?{...p,reposiciones:(p.reposiciones||[]).filter(r=>r.id!==repId)}:p);
-    svPermisos(nuevosPermisos);
-    const permisoActualizado=nuevosPermisos.find(p=>p.id===permisoId);
-    if(permisoActualizado)await syncRepos(permisoId,permisoActualizado.reposiciones,"permisos");
-  }
-
   function calcSaldoPermiso(p){
     const total=durToMin(p.duracion||"0");
     const repuesto=(p.reposiciones||[]).reduce((s,r)=>s+r.minutos,0);
@@ -635,6 +623,7 @@ function App(){
   }
   async function regreso(id){
     const entrada=Date.now();const salidaTs=activos[id]?.salida;
+    if(!salidaTs){alert("No hay una salida registrada para este colaborador.");return;}
     const colab=colabs.find(c=>c.id===id);
     const durMs=entrada-salidaTs;const minutos=Math.floor(durMs/60000);const segundos=Math.floor((durMs%60000)/1000);
     const reg={id:Date.now(),colabId:id,nombre:colab?.nombre||"—",salida:salidaTs,entrada,duracion:minutos+"m "+segundos.toString().padStart(2,"0")+"s",excedio:pasado(salidaTs),fecha:fmtFecha(salidaTs)};
@@ -649,8 +638,7 @@ function App(){
     const excedido=reg.excedio?"\n\nSe excedio del limite de 15 minutos.":"";
     const msg="Hola "+reg.nombre.split(" ")[0]+" 👋\n\n*Registro de Cafe*\n\nFecha: "+reg.fecha+"\nSalida: "+fmtHora(reg.salida)+"\nRegreso: "+fmtHora(reg.entrada)+"\nDuracion: "+reg.duracion+excedido;
     const colab=colabs.find(c=>c.nombre===reg.nombre);
-    const num=colab&&colab.telefono?colab.telefono.replace(/[^0-9]/g,""):"";
-    window.open(num?"https://wa.me/506"+num+"?text="+encodeURIComponent(msg):"https://wa.me/?text="+encodeURIComponent(msg),"_blank");
+    abrirWhatsApp(colab?.telefono,msg);
   }
 
   // Filtros
@@ -810,7 +798,7 @@ function App(){
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:C.g3}}>
                   {celdas.map((dia,i)=>{
-                    if(!dia)return<div key={i} style={{background:C.g1,minHeight:52}}/>;
+                    if(!dia)return<div key={"b"+i} style={{background:C.g1,minHeight:52}}/>;
                     const regs=regsEnDia(dia);const tieneVac=regs.length>0;
                     const perDia=permisosEnDia(dia);const tienePermisos=perDia.length>0;
                     const incDia=incapEnDia(dia);const tieneIncap=incDia.length>0;
@@ -820,7 +808,7 @@ function App(){
                     const bgColor=sel?C.naranja:tieneIncap?"#1A0A1A":tieneVac?"#1A1000":tienePermisos?"#0D1A0D":C.g1;
                     const txtColor=sel?C.blanco:esHoy?C.azulL:tieneIncap?"#C084FC":tieneVac?C.naranja:tienePermisos?"#4ADE80":C.texto;
                     return(
-                      <div key={dia} onClick={()=>setCalDia(sel?null:dia)} style={{background:bgColor,minHeight:52,padding:"5px 6px",cursor:tieneMarca?"pointer":"default",outline:esHoy?`2px solid ${C.azulL}`:"none",transition:"background .15s"}}>
+                      <div key={"d"+dia} onClick={()=>setCalDia(sel?null:dia)} style={{background:bgColor,minHeight:52,padding:"5px 6px",cursor:tieneMarca?"pointer":"default",outline:esHoy?`2px solid ${C.azulL}`:"none",transition:"background .15s"}}>
                         <div style={{fontSize:12,fontWeight:esHoy?800:500,color:txtColor}}>{dia}</div>
                         {!sel&&(
                           <div style={{marginTop:3,display:"flex",flexWrap:"wrap",gap:2}}>
@@ -1072,13 +1060,13 @@ function App(){
                             <div key={r.id} style={{display:"flex",gap:8,fontSize:12,padding:"5px 0",borderBottom:"1px solid "+C.g3,alignItems:"center"}}>
                               <span style={{color:C.naranja,minWidth:80}}>{r.fecha}</span>
                               <span style={{color:C.verde,fontWeight:700,flex:1}}>{"+" +r.texto}</span>
-                              <button onClick={()=>{setShowReposForm(p.id);setReposForm({fecha:r.fecha,duracion:r.texto,reposEditId:r.id});}} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.azulL}}>✏️</button>
-                              <button onClick={()=>deleteReposicion(p.id,r.id)} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.rojo}}>✕</button>
+                              <button onClick={()=>abrirReposForm("permisos",p.id,r)} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.azulL}}>✏️</button>
+                              <button onClick={()=>deleteReposicion("permisos",p.id,r.id)} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.rojo}}>✕</button>
                             </div>
                           ))}
                         </div>
                       )}
-                      <button onClick={()=>{setShowReposForm(p.id);setReposForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});}} style={{padding:"6px 14px",borderRadius:8,border:"1.5px solid #4ADE80",background:"transparent",color:"#4ADE80",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Agregar reposición</button>
+                      <button onClick={()=>abrirReposForm("permisos",p.id)} style={{padding:"6px 14px",borderRadius:8,border:"1.5px solid #4ADE80",background:"transparent",color:"#4ADE80",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Agregar reposición</button>
                     </div>
                   );
                 })}
@@ -1130,13 +1118,13 @@ function App(){
                             <div key={r.id} style={{display:"flex",gap:8,fontSize:12,padding:"5px 0",borderBottom:"1px solid "+C.g3,alignItems:"center"}}>
                               <span style={{color:C.naranja,minWidth:80}}>{r.fecha}</span>
                               <span style={{color:C.verde,fontWeight:700,flex:1}}>{"+" +r.texto}</span>
-                              <button onClick={()=>{setShowReposExtraForm(t.id);setReposExtraForm({fecha:r.fecha,duracion:r.texto,reposEditId:r.id});}} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.azulL}}>{"✏️"}</button>
-                              <button onClick={()=>deleteExtraReposicion(t.id,r.id)} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.rojo}}>{"✕"}</button>
+                              <button onClick={()=>abrirReposForm("tiempo_extra",t.id,r)} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.azulL}}>{"✏️"}</button>
+                              <button onClick={()=>deleteReposicion("tiempo_extra",t.id,r.id)} style={{padding:"2px 6px",borderRadius:4,border:"1px solid "+C.g3,background:"transparent",cursor:"pointer",fontSize:11,color:C.rojo}}>{"✕"}</button>
                             </div>
                           ))}
                         </div>
                       )}
-                      <button onClick={()=>{setShowReposExtraForm(t.id);setReposExtraForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});}} style={{padding:"6px 14px",borderRadius:8,border:"1.5px solid "+C.amarillo,background:"transparent",color:C.amarillo,fontSize:12,fontWeight:700,cursor:"pointer"}}>{"+ Registrar reposición"}</button>
+                      <button onClick={()=>abrirReposForm("tiempo_extra",t.id)} style={{padding:"6px 14px",borderRadius:8,border:"1.5px solid "+C.amarillo,background:"transparent",color:C.amarillo,fontSize:12,fontWeight:700,cursor:"pointer"}}>{"+ Registrar reposición"}</button>
                     </div>
                   );
                 })}
@@ -1164,9 +1152,9 @@ function App(){
           const DS=["D","L","M","X","J","V","S"];
           const primerDia=new Date(dbCalYear,dbCalMonth,1).getDay();
           const diasEnMes=new Date(dbCalYear,dbCalMonth+1,0).getDate();
-          const celdas=[];
-          for(let i=0;i<primerDia;i++)celdas.push(null);
-          for(let d=1;d<=diasEnMes;d++)celdas.push(d);
+          const dbCeldas=[];
+          for(let i=0;i<primerDia;i++)dbCeldas.push(null);
+          for(let d=1;d<=diasEnMes;d++)dbCeldas.push(d);
 
           function regsEnDiaDB(dia){
             const fecha=new Date(dbCalYear,dbCalMonth,dia);
@@ -1213,13 +1201,16 @@ function App(){
                     <div style={{fontSize:10,color:C.naranja,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>☕ Afuera ahora</div>
                     {afueraAhoraDB.map(c=>{
                       const ts=activos[c.id]?.salida;
-                      const exc=pasado(ts);
                       return(
-                        <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+C.g2}}>
-                          <span style={{fontSize:13,color:exc?C.rojo:C.naranja,fontWeight:600,flex:1}}>{c.nombre}</span>
-                          <span style={{fontSize:12,fontWeight:700,color:exc?C.rojo:C.amarillo}}>{exc?"⚠️ ":"⏱ "}{duracion(ts)}</span>
-                          <button onClick={()=>{setView("cafe");}} style={{padding:"3px 8px",borderRadius:6,border:"none",background:C.verde,color:C.blanco,fontSize:10,fontWeight:700,cursor:"pointer"}}>→</button>
-                        </div>
+                        <EstadoCafe key={c.id} salida={ts}>
+                          {({excedido,texto})=>(
+                            <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+C.g2}}>
+                              <span style={{fontSize:13,color:excedido?C.rojo:C.naranja,fontWeight:600,flex:1}}>{c.nombre}</span>
+                              <span style={{fontSize:12,fontWeight:700,color:excedido?C.rojo:C.amarillo}}>{excedido?"⚠️ ":"⏱ "}{texto}</span>
+                              <button onClick={()=>{setView("cafe");}} style={{padding:"3px 8px",borderRadius:6,border:"none",background:C.verde,color:C.blanco,fontSize:10,fontWeight:700,cursor:"pointer"}}>→</button>
+                            </div>
+                          )}
+                        </EstadoCafe>
                       );
                     })}
                   </div>
@@ -1240,8 +1231,8 @@ function App(){
                   {DS.map(d=><div key={d} style={{textAlign:"center",fontSize:10,color:C.naranja,fontWeight:700,padding:"2px 0"}}>{d}</div>)}
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
-                  {celdas.map((dia,i)=>{
-                    if(!dia)return<div key={i} style={{minHeight:32}}/>;
+                  {dbCeldas.map((dia,i)=>{
+                    if(!dia)return<div key={"b"+i} style={{minHeight:32}}/>;
                     const regs=regsEnDiaDB(dia);
                     const perDia=permisosEnDiaDB(dia);
                     const incDia=incapEnDiaDB(dia);
@@ -1249,7 +1240,7 @@ function App(){
                     const sel=dbCalDia===dia;
                     const esHoy=hoy.getDate()===dia&&hoy.getMonth()===dbCalMonth&&hoy.getFullYear()===dbCalYear;
                     return(
-                      <div key={dia} onClick={()=>setDbCalDia(sel?null:dia)} style={{minHeight:32,padding:"3px 2px",borderRadius:6,background:sel?C.naranja:esHoy?C.naranjaD+"40":"transparent",cursor:tieneMarca?"pointer":"default",outline:esHoy?"2px solid "+C.azulL:"none"}}>
+                      <div key={"d"+dia} onClick={()=>setDbCalDia(sel?null:dia)} style={{minHeight:32,padding:"3px 2px",borderRadius:6,background:sel?C.naranja:esHoy?C.naranjaD+"40":"transparent",cursor:tieneMarca?"pointer":"default",outline:esHoy?"2px solid "+C.azulL:"none"}}>
                         <div style={{textAlign:"center",fontSize:11,fontWeight:esHoy?800:400,color:sel?C.blanco:esHoy?C.azulL:C.texto}}>{dia}</div>
                         <div style={{display:"flex",justifyContent:"center",gap:1,marginTop:1}}>
                           {regs.length>0&&<div style={{width:5,height:5,borderRadius:"50%",background:C.naranja}}/>}
@@ -1365,16 +1356,20 @@ function App(){
                     <div className="pulsar" style={{fontSize:10,color:C.naranja,fontWeight:800,letterSpacing:2,textTransform:"uppercase",marginBottom:10,display:"inline-block"}}>☕ Afuera ahora ({afueraAhora.length})</div>
                     <div style={{display:"grid",gap:8}}>
                       {afueraAhora.map(c=>{
-                        const ts=activos[c.id]?.salida;const exc=pasado(ts);
+                        const ts=activos[c.id]?.salida;
                         return(
-                          <div key={c.id} style={{background:exc?"#1A0505":C.g1,border:`2px solid ${exc?C.rojo:C.naranja}`,borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:12}}>
-                            <div style={{flex:1}}>
-                              <div style={{fontWeight:700,fontSize:14,color:exc?C.rojo:C.texto}}>{c.nombre}</div>
-                              <div style={{fontSize:12,color:C.textoS,marginTop:2}}>Salió a las <span style={{color:C.naranja,fontWeight:700}}>{fmtHora(ts)}</span></div>
-                              <div style={{fontSize:13,fontWeight:800,color:exc?C.rojo:C.amarillo,marginTop:3}}>{exc?"⚠️ ":"⏱ "}{duracion(ts)}{exc?" — SE PASÓ":""}</div>
-                            </div>
-                            <button onClick={()=>regreso(c.id)} style={{padding:"9px 14px",borderRadius:10,border:"none",background:C.verde,color:C.blanco,fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Regresó</button>
-                          </div>
+                          <EstadoCafe key={c.id} salida={ts}>
+                            {({excedido,texto})=>(
+                              <div style={{background:excedido?"#1A0505":C.g1,border:`2px solid ${excedido?C.rojo:C.naranja}`,borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:12}}>
+                                <div style={{flex:1}}>
+                                  <div style={{fontWeight:700,fontSize:14,color:excedido?C.rojo:C.texto}}>{c.nombre}</div>
+                                  <div style={{fontSize:12,color:C.textoS,marginTop:2}}>Salió a las <span style={{color:C.naranja,fontWeight:700}}>{fmtHora(ts)}</span></div>
+                                  <div style={{fontSize:13,fontWeight:800,color:excedido?C.rojo:C.amarillo,marginTop:3}}>{excedido?"⚠️ ":"⏱ "}{texto}{excedido?" — SE PASÓ":""}</div>
+                                </div>
+                                <button onClick={()=>regreso(c.id)} style={{padding:"9px 14px",borderRadius:10,border:"none",background:C.verde,color:C.blanco,fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Regresó</button>
+                              </div>
+                            )}
+                          </EstadoCafe>
                         );
                       })}
                     </div>
@@ -1492,26 +1487,33 @@ function App(){
         </Modal>
       )}
 
-      {showReposForm&&(
-        <Modal title={reposForm.reposEditId?"Editar reposición":"Agregar reposición"} onClose={()=>{setShowReposForm(null);setReposForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});}}>
-          <Field label="Fecha de reposición">
-            <input type="date" value={reposForm.fecha} onChange={e=>setReposForm(p=>({...p,fecha:e.target.value}))} style={inp}/>
-          </Field>
-          <Field label="Tiempo repuesto">
-            <input value={reposForm.duracion} onChange={e=>setReposForm(p=>({...p,duracion:e.target.value}))} style={inp} placeholder="Ej: 1h, 30m, 1h 30m, 1:30"/>
-          </Field>
-          <div style={{background:"#14532D",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:13,color:"#4ADE80",fontWeight:700}}>
-            {"Total: "+minToDur(durToMin(reposForm.duracion||"0"))}
-          </div>
-          <div style={{fontSize:11,color:C.textoS,marginBottom:12}}>
-            Formatos válidos: 1h · 30m · 1h 30m · 1:30
-          </div>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={saveReposicion} style={{padding:"9px 18px",borderRadius:8,border:"none",background:"#4ADE80",color:C.negro,fontSize:13,fontWeight:700,cursor:"pointer"}}>Guardar</button>
-            <button onClick={()=>{setShowReposForm(null);setReposForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});}} style={btnS}>Cancelar</button>
-          </div>
-        </Modal>
-      )}
+      {showReposForm&&(()=>{
+        const esPermiso=showReposForm.tipo==="permisos";
+        const color=esPermiso?"#4ADE80":C.amarillo;
+        return(
+          <Modal title={reposForm.reposEditId?"Editar reposición":esPermiso?"Agregar reposición":"Registrar reposición de empresa"} onClose={cerrarReposForm}>
+            {!esPermiso&&(
+              <div style={{background:C.amarillo+"15",border:"1px solid "+C.amarillo,borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.amarillo}}>
+                {"📥 Tiempo que la empresa le repone al colaborador."}
+              </div>
+            )}
+            <Field label={esPermiso?"Fecha de reposición":"Fecha"}>
+              <input type="date" value={reposForm.fecha} onChange={e=>setReposForm(p=>({...p,fecha:e.target.value}))} style={inp}/>
+            </Field>
+            <Field label="Tiempo repuesto">
+              <input value={reposForm.duracion} onChange={e=>setReposForm(p=>({...p,duracion:e.target.value}))} style={inp} placeholder="Ej: 1h, 30m, 1h 30m, 1:30"/>
+            </Field>
+            <div style={{background:color+"15",borderRadius:8,padding:"8px 12px",marginBottom:8,fontSize:13,color:color,fontWeight:700}}>
+              {"Total: "+minToDur(durToMin(reposForm.duracion||"0"))}
+            </div>
+            <div style={{fontSize:11,color:C.textoS,marginBottom:12}}>Formatos válidos: 1h · 30m · 1h 30m · 1:30</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={saveReposicion} style={{padding:"9px 18px",borderRadius:8,border:"none",background:color,color:C.negro,fontSize:13,fontWeight:700,cursor:"pointer"}}>Guardar</button>
+              <button onClick={cerrarReposForm} style={btnS}>Cancelar</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {showIncapForm&&(
         <Modal title={incapEdit?"Editar incapacidad":"Nueva incapacidad"} onClose={resetIncapForm}>
@@ -1568,25 +1570,7 @@ function App(){
         </Modal>
       )}
 
-      {showReposExtraForm&&(
-        <Modal title={reposExtraForm.reposEditId?"Editar reposición":"Registrar reposición de empresa"} onClose={()=>{setShowReposExtraForm(null);setReposExtraForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});}}>
-          <div style={{background:C.amarillo+"15",border:"1px solid "+C.amarillo,borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.amarillo}}>
-            {"📥 Tiempo que la empresa le repone al colaborador."}
-          </div>
-          <Field label="Fecha"><input type="date" value={reposExtraForm.fecha} onChange={e=>setReposExtraForm(p=>({...p,fecha:e.target.value}))} style={inp}/></Field>
-          <Field label="Tiempo repuesto">
-            <input value={reposExtraForm.duracion} onChange={e=>setReposExtraForm(p=>({...p,duracion:e.target.value}))} style={inp} placeholder="Ej: 1h, 30m, 1h 30m, 1:30"/>
-          </Field>
-          <div style={{background:C.amarillo+"15",borderRadius:8,padding:"8px 12px",marginBottom:8,fontSize:13,color:C.amarillo,fontWeight:700}}>
-            {"Total: "+minToDur(durToMin(reposExtraForm.duracion||"0"))}
-          </div>
-          <div style={{fontSize:11,color:C.textoS,marginBottom:12}}>Formatos válidos: 1h · 30m · 1h 30m · 1:30</div>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={saveExtraReposicion} style={{padding:"9px 18px",borderRadius:8,border:"none",background:C.amarillo,color:C.negro,fontSize:13,fontWeight:700,cursor:"pointer"}}>Guardar</button>
-            <button onClick={()=>{setShowReposExtraForm(null);setReposExtraForm({fecha:new Date().toISOString().split("T")[0],duracion:"",reposEditId:null});}} style={btnS}>Cancelar</button>
-          </div>
-        </Modal>
-      )}
+
 
       {showPermisoForm&&(
         <Modal title={permisoEdit?"Editar permiso":"Nuevo permiso especial"} onClose={resetPermisoForm}>
@@ -1666,6 +1650,19 @@ function Field({label,children}){
       {children}
     </div>
   );
+}
+
+function EstadoCafe({salida,children}){
+  const [now,setNow]=useState(Date.now());
+  useEffect(()=>{
+    const t=setInterval(()=>setNow(Date.now()),1000);
+    return()=>clearInterval(t);
+  },[]);
+  const ms=now-salida;
+  const excedido=ms>LIMITE_CAFE*60*1000;
+  const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000);
+  const texto=`${m}m ${s.toString().padStart(2,"0")}s`;
+  return children({excedido,texto});
 }
 
 function Empty({icon,msg}){
