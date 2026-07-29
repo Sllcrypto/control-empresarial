@@ -45,6 +45,14 @@ const SB_URL = "https://nmxcvxmieeyhecuscacm.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5teGN2eG1pZWV5aGVjdXNjYWNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mzk2NzgsImV4cCI6MjA5NzMxNTY3OH0.I5jTt8CiONxmnZphP0CFZ1tcfUjiC-rwU94vInw5kw0";
 const sb = window.supabase.createClient(SB_URL, SB_KEY);
 
+// Cuentas de acceso (PIN de login). Deben existir en Supabase
+// Authentication > Users con estos mismos correos y, como contraseña,
+// el PIN de cada persona (mínimo 6 caracteres).
+const CUENTAS_PIN = [
+  "admin1@controlempresarial.local",
+  "admin2@controlempresarial.local",
+];
+
 function fmtDate(d){if(!d)return"—";const[y,m,day]=d.split("-");return`${day}/${m}/${y}`;}
 function fmtHora(ts){if(!ts)return"—";return new Date(ts).toLocaleTimeString("es-CR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});}
 function fmtFecha(ts){if(!ts)return"—";return new Date(ts).toLocaleDateString("es-CR",{day:"2-digit",month:"2-digit",year:"numeric"});}
@@ -146,6 +154,20 @@ const REGS_INIT = [
 ];
 
 function App(){
+  const [session,setSession]=useState(null);
+  const [authChecking,setAuthChecking]=useState(true);
+
+  useEffect(()=>{
+    sb.auth.getSession().then(({data})=>{
+      setSession(data.session);
+      setAuthChecking(false);
+    });
+    const {data:listener}=sb.auth.onAuthStateChange((_event,newSession)=>{
+      setSession(newSession);
+    });
+    return()=>listener.subscription.unsubscribe();
+  },[]);
+
   const [view,setView]=useState("dashboard");
   const [colabs,setColabs]=useState(()=>ls("ce_colabs",COLABS_INIT));
   const [registros,setRegistros]=useState(()=>ls("ce_regs",REGS_INIT));
@@ -278,6 +300,7 @@ function App(){
 
   // Cargar datos desde Supabase
   useEffect(()=>{
+    if(!session){setCargando(false);return;}
     async function cargar(){
       try{
         // Colaboradores
@@ -342,7 +365,7 @@ function App(){
       setCargando(false);
     }
     cargar();
-  },[]);
+  },[session]);
 
   useEffect(()=>{
     const hoy=new Date();
@@ -662,14 +685,29 @@ function App(){
   const btnD={padding:"9px 18px",borderRadius:8,border:"none",background:C.rojo,color:C.blanco,fontSize:13,fontWeight:700,cursor:"pointer"};
   const td={padding:"10px 11px"};
 
+  if(authChecking){
+    return(
+      <div style={{minHeight:"100vh",background:C.negro,display:"flex",alignItems:"center",justifyContent:"center",color:C.textoM,fontSize:13}}>
+        Cargando...
+      </div>
+    );
+  }
+
+  if(!session){
+    return <LoginPin/>;
+  }
+
   return(
     <div style={{minHeight:"100vh",background:C.negro}}>
 
       {/* Header */}
       <div style={{background:C.g1,borderBottom:`2px solid ${C.naranja}`,padding:"0 16px",position:"sticky",top:0,zIndex:50}}>
-        <div style={{padding:"12px 0 6px"}}>
-          <div style={{fontSize:9,color:C.naranja,letterSpacing:2,textTransform:"uppercase"}}>{"Sistema de "+(sbOnline?"🟢":"🔴")}</div>
-          <div style={{fontSize:20,fontWeight:800,color:C.blanco}}>Control Empresarial</div>
+        <div style={{padding:"12px 0 6px",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:9,color:C.naranja,letterSpacing:2,textTransform:"uppercase"}}>{"Sistema de "+(sbOnline?"🟢":"🔴")}</div>
+            <div style={{fontSize:20,fontWeight:800,color:C.blanco}}>Control Empresarial</div>
+          </div>
+          <button onClick={()=>sb.auth.signOut()} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${C.g3}`,background:"transparent",color:C.textoM,fontSize:11,cursor:"pointer",marginTop:2}}>Salir</button>
         </div>
         <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:10}}>
           {[["dashboard","⚡ Inicio"],["cafe","☕ Café"],["registros","📋 Vacaciones"],["permisos","📝 Permisos"],["incapacidades","🏥 Incapac."],["calendario","📅 Calendario"],["colaboradores","👥 Colabs"]].map(([v,label])=>(
@@ -1625,6 +1663,47 @@ function App(){
           <div style={{display:"flex",gap:10}}><button onClick={()=>{svHistCafe([]);setShowBorrarHist(false);}} style={btnD}>Sí, borrar todo</button><button onClick={()=>setShowBorrarHist(false)} style={btnS}>Cancelar</button></div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+function LoginPin(){
+  const [pin,setPin]=useState("");
+  const [cargando,setCargando]=useState(false);
+  const [error,setError]=useState("");
+
+  async function entrar(e){
+    e.preventDefault();
+    if(!pin||pin.length<6){setError("El PIN debe tener al menos 6 caracteres");return;}
+    setCargando(true);setError("");
+    let ok=false;
+    for(const email of CUENTAS_PIN){
+      const {error:err}=await sb.auth.signInWithPassword({email,password:pin});
+      if(!err){ok=true;break;}
+    }
+    setCargando(false);
+    if(!ok)setError("PIN incorrecto");
+  }
+
+  return(
+    <div style={{minHeight:"100vh",background:C.negro,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <form onSubmit={entrar} style={{width:"100%",maxWidth:320,background:C.g1,borderRadius:14,padding:28,border:`1px solid ${C.g3}`}}>
+        <div style={{fontSize:20,fontWeight:800,color:C.blanco,marginBottom:4,textAlign:"center"}}>Control Empresarial</div>
+        <div style={{fontSize:12,color:C.textoM,marginBottom:22,textAlign:"center"}}>Ingresá tu PIN para continuar</div>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={e=>{setPin(e.target.value);setError("");}}
+          placeholder="PIN"
+          style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1.5px solid ${error?C.rojo:C.g3}`,fontSize:18,letterSpacing:4,textAlign:"center",color:C.texto,background:C.g2,boxSizing:"border-box",marginBottom:14}}
+        />
+        {error&&<div style={{color:C.rojo,fontSize:12,textAlign:"center",marginBottom:14}}>{error}</div>}
+        <button type="submit" disabled={cargando} style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:C.naranja,color:C.blanco,fontSize:14,fontWeight:700,cursor:cargando?"default":"pointer",opacity:cargando?.6:1}}>
+          {cargando?"Verificando...":"Entrar"}
+        </button>
+      </form>
     </div>
   );
 }
