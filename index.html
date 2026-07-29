@@ -41,6 +41,25 @@ const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto"
 const MOTIVOS = ["Médico","Judicial","Familiar","Personal","Otro"];
 const LIMITE_CAFE = 15;
 
+const TABLA_LABELS = {
+  colaboradores:"Colaboradores", registros:"Vacaciones", permisos:"Permisos",
+  tiempo_extra:"Tiempo extra", incapacidades:"Incapacidades",
+  cafe_activos:"Café (en vivo)", cafe_historial:"Café (historial)",
+};
+const ACCION_LABELS = {
+  INSERT:{txt:"Creó",color:"#22C55E"}, UPDATE:{txt:"Editó",color:"#EAB308"}, DELETE:{txt:"Eliminó",color:"#EF4444"},
+};
+function diffCampos(oldD,newD){
+  const base=newD||oldD||{};
+  const campos=[];
+  Object.keys(base).forEach(k=>{
+    if(k==="id")return;
+    const a=oldD?oldD[k]:undefined, b=newD?newD[k]:undefined;
+    if(JSON.stringify(a)!==JSON.stringify(b))campos.push({campo:k,antes:a,despues:b});
+  });
+  return campos;
+}
+
 const SB_URL = "https://nmxcvxmieeyhecuscacm.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5teGN2eG1pZWV5aGVjdXNjYWNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mzk2NzgsImV4cCI6MjA5NzMxNTY3OH0.I5jTt8CiONxmnZphP0CFZ1tcfUjiC-rwU94vInw5kw0";
 const sb = window.supabase.createClient(SB_URL, SB_KEY);
@@ -219,6 +238,12 @@ function App(){
   const [cafeBusqueda,setCafeBusqueda]=useState("");
   const [showBorrarHist,setShowBorrarHist]=useState(false);
 
+  // UI auditoría
+  const [auditLog,setAuditLog]=useState([]);
+  const [auditCargando,setAuditCargando]=useState(false);
+  const [auditExpandido,setAuditExpandido]=useState(null);
+  const [auditFiltroTabla,setAuditFiltroTabla]=useState("Todas");
+
   // Acumulación mensual
   // Realtime colaboradores
   useEffect(()=>{
@@ -366,6 +391,17 @@ function App(){
     }
     cargar();
   },[session]);
+
+  // Auditoría: carga bajo demanda al abrir la pestaña
+  async function cargarAuditoria(){
+    setAuditCargando(true);
+    const {data,error}=await sb.from("audit_log").select("*").order("created_at",{ascending:false}).limit(300);
+    if(!error&&data)setAuditLog(data);
+    setAuditCargando(false);
+  }
+  useEffect(()=>{
+    if(view==="auditoria"&&session&&auditLog.length===0&&!auditCargando)cargarAuditoria();
+  },[view,session]);
 
   useEffect(()=>{
     const hoy=new Date();
@@ -710,7 +746,7 @@ function App(){
           <button onClick={()=>sb.auth.signOut()} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${C.g3}`,background:"transparent",color:C.textoM,fontSize:11,cursor:"pointer",marginTop:2}}>Salir</button>
         </div>
         <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:10}}>
-          {[["dashboard","⚡ Inicio"],["cafe","☕ Café"],["registros","📋 Vacaciones"],["permisos","📝 Permisos"],["incapacidades","🏥 Incapac."],["calendario","📅 Calendario"],["colaboradores","👥 Colabs"]].map(([v,label])=>(
+          {[["dashboard","⚡ Inicio"],["cafe","☕ Café"],["registros","📋 Vacaciones"],["permisos","📝 Permisos"],["incapacidades","🏥 Incapac."],["calendario","📅 Calendario"],["colaboradores","👥 Colabs"],["auditoria","🔍 Auditoría"]].map(([v,label])=>(
             <button key={v} onClick={()=>setView(v)} style={{padding:"7px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",background:view===v?C.naranja:C.g2,color:view===v?C.blanco:C.textoM}}>{label}</button>
           ))}
         </div>
@@ -1467,6 +1503,53 @@ function App(){
             )}
 
 
+          </div>
+        )}
+
+        {/* ══ AUDITORÍA ══ */}
+        {view==="auditoria"&&(
+          <div>
+            <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+              <select value={auditFiltroTabla} onChange={e=>setAuditFiltroTabla(e.target.value)} style={{...inp,width:"auto"}}>
+                <option value="Todas">Todos los módulos</option>
+                {Object.keys(TABLA_LABELS).map(t=><option key={t} value={t}>{TABLA_LABELS[t]}</option>)}
+              </select>
+              <button onClick={cargarAuditoria} style={btnS}>{auditCargando?"Cargando...":"🔄 Refrescar"}</button>
+            </div>
+            {auditCargando&&auditLog.length===0&&<Empty icon="⏳" msg="Cargando auditoría..."/>}
+            {!auditCargando&&auditLog.length===0&&<Empty icon="🔍" msg="Sin actividad registrada todavía."/>}
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {auditLog.filter(a=>auditFiltroTabla==="Todas"||a.table_name===auditFiltroTabla).map(a=>{
+                const ac=ACCION_LABELS[a.action]||{txt:a.action,color:C.textoM};
+                const campos=diffCampos(a.old_data,a.new_data);
+                const abierto=auditExpandido===a.id;
+                return(
+                  <div key={a.id} style={{background:C.g1,borderRadius:10,border:`1px solid ${C.g3}`,overflow:"hidden"}}>
+                    <div onClick={()=>setAuditExpandido(abierto?null:a.id)} style={{padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:10,flexWrap:"wrap"}}>
+                      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,fontWeight:700,color:ac.color,background:ac.color+"20",padding:"3px 8px",borderRadius:6}}>{ac.txt}</span>
+                        <span style={{fontSize:13,color:C.texto,fontWeight:600}}>{TABLA_LABELS[a.table_name]||a.table_name}</span>
+                        <span style={{fontSize:12,color:C.textoM}}>{a.user_email?a.user_email.split("@")[0]:"—"}</span>
+                      </div>
+                      <span style={{fontSize:11,color:C.textoS}}>{fmtFecha(a.created_at)} · {fmtHora(a.created_at)}</span>
+                    </div>
+                    {abierto&&(
+                      <div style={{padding:"0 14px 14px",borderTop:`1px solid ${C.g3}`}}>
+                        {campos.length===0&&<div style={{fontSize:12,color:C.textoS,paddingTop:10}}>Sin detalles adicionales.</div>}
+                        {campos.map(c=>(
+                          <div key={c.campo} style={{fontSize:12,padding:"6px 0",borderBottom:`1px solid ${C.g2}`}}>
+                            <span style={{color:C.textoM,fontWeight:700}}>{c.campo}: </span>
+                            <span style={{color:C.rojo,textDecoration:"line-through"}}>{c.antes===undefined?"—":String(c.antes)}</span>
+                            {" → "}
+                            <span style={{color:C.verde}}>{c.despues===undefined?"—":String(c.despues)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
