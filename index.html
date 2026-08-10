@@ -287,6 +287,18 @@ function App(){
   const [dbCalDia,setDbCalDia]=useState(null);
   const [regForm,setRegForm]=useState({colabId:"",boleta:"",fechaInicio:"",fechaFin:"",mes:MESES[new Date().getMonth()],dias:"",estado:"confirmado"});
   const [colabForm,setColabForm]=useState({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:"",horarioEspecialDias:{}});
+  const [asignRapida,setAsignRapida]=useState({entrada:"",salida:"",dias:{lun:false,mar:false,mie:false,jue:false,vie:false,sab:false}});
+  function toggleDiaRapido(dk){setAsignRapida(p=>({...p,dias:{...p.dias,[dk]:!p.dias[dk]}}));}
+  function aplicarAsignRapida(){
+    const {entrada,salida,dias}=asignRapida;
+    if(!entrada||!salida)return;
+    setColabForm(p=>{
+      const nuevo={...(p.horarioEspecialDias||{})};
+      Object.keys(dias).forEach(dk=>{if(dias[dk])nuevo[dk]={entrada,salida};});
+      return {...p,horarioEspecialDias:nuevo};
+    });
+    setAsignRapida(p=>({...p,dias:{lun:false,mar:false,mie:false,jue:false,vie:false,sab:false}}));
+  }
 
   // UI horarios
   const [horariosConfig,setHorariosConfig]=useState(()=>ls("ce_horarios_cfg",HORARIOS_CFG_INIT));
@@ -1061,7 +1073,7 @@ function App(){
         {view==="colaboradores"&&(
           <div>
             <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
-              <button onClick={()=>{setShowColabForm(true);setColabEdit(null);setColabForm({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:"",horarioEspecialDias:{}});}} style={btnP}>+ Agregar</button>
+              <button onClick={()=>{setShowColabForm(true);setColabEdit(null);setColabForm({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:"",horarioEspecialDias:{}});setAsignRapida({entrada:"",salida:"",dias:{lun:false,mar:false,mie:false,jue:false,vie:false,sab:false}});}} style={btnP}>+ Agregar</button>
             </div>
             {AREAS.map(area=>{
               const del_area=colabs.filter(c=>c.area===area);if(!del_area.length)return null;
@@ -1081,7 +1093,7 @@ function App(){
                               <div style={{fontSize:11,color:C.textoS,marginTop:2}}>{registros.filter(r=>r.colabId===c.id&&!r.historico).length} registro(s) · {usados} usados · {permisos.filter(p=>p.colabId===c.id).length} permiso(s)</div>
                             </div>
                             <button onClick={()=>setExpandedColab(exp?null:c.id)} style={{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${C.azul}`,background:exp?C.azul:"transparent",color:exp?C.blanco:C.azul,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{exp?"▲":"＋ Ver"}</button>
-                            <button onClick={()=>{setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||"",horarioEspecialDias:c.horarioEspecialDias||{}});setColabEdit(c.id);setShowColabForm(true);}} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
+                            <button onClick={()=>{setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||"",horarioEspecialDias:c.horarioEspecialDias||{}});setColabEdit(c.id);setShowColabForm(true);setAsignRapida({entrada:"",salida:"",dias:{lun:false,mar:false,mie:false,jue:false,vie:false,sab:false}});}} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
                             <button onClick={()=>setDelConfirm({type:"colab",id:c.id})} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
                           </div>
                           {exp&&(
@@ -1156,6 +1168,7 @@ function App(){
           function abrirEditarColab(c){
             setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||"",horarioEspecialDias:c.horarioEspecialDias||{}});
             setColabEdit(c.id);setShowColabForm(true);
+            setAsignRapida({entrada:"",salida:"",dias:{lun:false,mar:false,mie:false,jue:false,vie:false,sab:false}});
           }
           function FilaColab({c}){
             return(
@@ -1877,13 +1890,29 @@ function App(){
                   </div>
                 </Field>
                 <div style={{fontSize:11,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,margin:"12px 0 6px"}}>Horario por día (dejá vacío el día que no trabaja)</div>
+
+                <div style={{background:C.g2,borderRadius:10,padding:12,marginBottom:12,border:`1px dashed ${C.g3}`}}>
+                  <div style={{fontSize:11,color:C.textoM,fontWeight:700,marginBottom:8}}>⚡ Asignación rápida — poné la hora una vez y marcá a qué días aplica</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                    <input type="time" value={asignRapida.entrada} onChange={e=>setAsignRapida(p=>({...p,entrada:e.target.value}))} style={inp} placeholder="Entrada"/>
+                    <input type="time" value={asignRapida.salida} onChange={e=>setAsignRapida(p=>({...p,salida:e.target.value}))} style={inp} placeholder="Salida"/>
+                  </div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                    {DIAS_SEMANA.map(([dk,label])=>(
+                      <button key={dk} onClick={()=>toggleDiaRapido(dk)} style={{padding:"6px 10px",borderRadius:20,border:`1.5px solid ${asignRapida.dias[dk]?C.azulL:C.g3}`,background:asignRapida.dias[dk]?C.azulL+"25":"transparent",color:asignRapida.dias[dk]?C.azulL:C.textoM,fontSize:11,fontWeight:700,cursor:"pointer"}}>{label.slice(0,3)}</button>
+                    ))}
+                  </div>
+                  <button onClick={aplicarAsignRapida} style={{...btnP,padding:"7px 14px",fontSize:12,width:"100%"}}>Aplicar a los días marcados</button>
+                </div>
+
                 {DIAS_SEMANA.map(([dk,label])=>{
                   const dia=colabForm.horarioEspecialDias?.[dk]||{entrada:"",salida:""};
                   return(
-                    <div key={dk} style={{display:"grid",gridTemplateColumns:"70px 1fr 1fr",gap:8,alignItems:"center",marginBottom:6}}>
+                    <div key={dk} style={{display:"grid",gridTemplateColumns:"70px 1fr 1fr 26px",gap:8,alignItems:"center",marginBottom:6}}>
                       <div style={{fontSize:12,color:C.textoM,fontWeight:600}}>{label}</div>
                       <input type="time" value={dia.entrada||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialDias:{...p.horarioEspecialDias,[dk]:{...dia,entrada:e.target.value}}}))} style={inp} placeholder="Entrada"/>
                       <input type="time" value={dia.salida||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialDias:{...p.horarioEspecialDias,[dk]:{...dia,salida:e.target.value}}}))} style={inp} placeholder="Salida"/>
+                      <button onClick={()=>setColabForm(p=>({...p,horarioEspecialDias:{...p.horarioEspecialDias,[dk]:{entrada:"",salida:""}}}))} title="Limpiar día" style={{padding:"6px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:11,color:C.textoS}}>✕</button>
                     </div>
                   );
                 })}
