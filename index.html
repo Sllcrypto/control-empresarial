@@ -45,6 +45,7 @@ const TABLA_LABELS = {
   colaboradores:"Colaboradores", registros:"Vacaciones", permisos:"Permisos",
   tiempo_extra:"Tiempo extra", incapacidades:"Incapacidades",
   cafe_activos:"Café (en vivo)", cafe_historial:"Café (historial)",
+  horarios_config:"Horarios (config)",
 };
 const ACCION_LABELS = {
   INSERT:{txt:"Creó",color:"#22C55E"}, UPDATE:{txt:"Editó",color:"#EAB308"}, DELETE:{txt:"Eliminó",color:"#EF4444"},
@@ -108,31 +109,84 @@ function abrirWhatsApp(telefono,mensaje){
   window.open(url,"_blank","noopener,noreferrer");
 }
 
+// ══ HORARIOS ══
+const GRUPO_LABEL = {grupo1:"Grupo 1",grupo2:"Grupo 2"};
+const HORARIOS_CFG_INIT = {
+  semanaAncla:"2026-08-10", grupoTempranoAncla:"grupo2",
+  lvTempranoEntrada:"07:12", lvTempranoSalida:"16:45",
+  lvTardeEntrada:"08:15", lvTardeSalida:"17:45",
+  sabTempranoEntrada:"07:30", sabTempranoSalida:"14:00",
+  sabTardeEntrada:"09:30", sabTardeSalida:"16:00",
+};
+function semanaLunes(fecha){
+  const dt=new Date(fecha);dt.setHours(0,0,0,0);
+  const day=dt.getDay();const diff=day===0?-6:1-day;
+  dt.setDate(dt.getDate()+diff);
+  return dt.toISOString().split("T")[0];
+}
+function minutosEntre(h1,h2){
+  if(!h1||!h2)return 0;
+  const[a1,b1]=h1.split(":").map(Number);const[a2,b2]=h2.split(":").map(Number);
+  const m=(a2*60+b2)-(a1*60+b1);
+  return m>0?m:0;
+}
+function grupoTempranoDeSemana(cfg,fechaRef){
+  const lunesActual=semanaLunes(fechaRef||new Date());
+  const msSemana=7*24*60*60*1000;
+  const diffSemanas=Math.round((new Date(lunesActual+"T00:00:00")-new Date(cfg.semanaAncla+"T00:00:00"))/msSemana);
+  const esPar=((diffSemanas%2)+2)%2===0;
+  const otro=cfg.grupoTempranoAncla==="grupo1"?"grupo2":"grupo1";
+  return esPar?cfg.grupoTempranoAncla:otro;
+}
+function horarioDeGrupo(cfg,grupoId,fechaRef){
+  const temprano=grupoTempranoDeSemana(cfg,fechaRef)===grupoId;
+  return temprano
+    ?{tipo:"Temprano",lv:{entrada:cfg.lvTempranoEntrada,salida:cfg.lvTempranoSalida},sab:{entrada:cfg.sabTempranoEntrada,salida:cfg.sabTempranoSalida}}
+    :{tipo:"Tarde",lv:{entrada:cfg.lvTardeEntrada,salida:cfg.lvTardeSalida},sab:{entrada:cfg.sabTardeEntrada,salida:cfg.sabTardeSalida}};
+}
+function horasSemanalesColab(c,cfg){
+  if(!c.grupoHorario)return null;
+  if(c.grupoHorario==="especial")return c.horarioEspecialHoras?Number(c.horarioEspecialHoras):null;
+  if(c.grupoHorario!=="grupo1"&&c.grupoHorario!=="grupo2")return null;
+  const h=horarioDeGrupo(cfg,c.grupoHorario);
+  const lvMin=minutosEntre(h.lv.entrada,h.lv.salida)*5;
+  const sabMin=minutosEntre(h.sab.entrada,h.sab.salida);
+  const almMin=(c.almuerzoInicio&&c.almuerzoFin)?minutosEntre(c.almuerzoInicio,c.almuerzoFin)*5:0;
+  const total=lvMin+sabMin-almMin;
+  return +(total/60).toFixed(2);
+}
+function fmtRangoSemana(lunesStr){
+  const lunes=new Date(lunesStr+"T00:00:00");
+  const sab=new Date(lunes);sab.setDate(lunes.getDate()+5);
+  const f=d=>`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`;
+  return `${f(lunes)} – ${f(sab)}`;
+}
+
 const COLABS_INIT = [
   {id:1,nombre:"Padilla Rosales Allan",area:"Administrativa",diasAcumulados:10,telefono:""},
   {id:2,nombre:"Losilla Lacayo Sebastian",area:"Administrativa",diasAcumulados:9,telefono:""},
   {id:3,nombre:"Piedra Valverde Lidier",area:"Administrativa",diasAcumulados:14,telefono:""},
   {id:4,nombre:"Chavez Somarriba Yader",area:"Despacho",diasAcumulados:13,telefono:""},
   {id:5,nombre:"Garro Roman Caleb",area:"Despacho",diasAcumulados:3,telefono:""},
-  {id:6,nombre:"Cajina Mairena Jonathan",area:"Despacho",diasAcumulados:6,telefono:""},
-  {id:7,nombre:"Luis Ureña Salas",area:"Despacho",diasAcumulados:9,telefono:""},
-  {id:8,nombre:"Andres Garcia Trujillo",area:"Despacho",diasAcumulados:7,telefono:""},
-  {id:9,nombre:"Miguel Pastor Mejia",area:"Despacho",diasAcumulados:4,telefono:""},
-  {id:10,nombre:"Rafael Castillo Arias",area:"Despacho",diasAcumulados:10,telefono:""},
-  {id:11,nombre:"Carlos Araya Mora",area:"Despacho",diasAcumulados:10,telefono:""},
-  {id:12,nombre:"Alvaro Moreno Rojas",area:"Despacho",diasAcumulados:11,telefono:""},
-  {id:13,nombre:"Jorge Arrieta Bolaños",area:"Despacho",diasAcumulados:5,telefono:""},
-  {id:14,nombre:"Willian Flores Pavon",area:"Despacho",diasAcumulados:3,telefono:""},
-  {id:15,nombre:"Lus Diego Castro Fallas",area:"Despacho",diasAcumulados:2,telefono:""},
-  {id:16,nombre:"Diego Jesus Brenes Sequeira",area:"Despacho",diasAcumulados:15,telefono:""},
-  {id:17,nombre:"Humberto Molina Flores",area:"Despacho",diasAcumulados:8,telefono:""},
+  {id:6,nombre:"Cajina Mairena Jonathan",area:"Despacho",diasAcumulados:6,telefono:"",grupoHorario:"grupo1",almuerzoInicio:"14:00",almuerzoFin:"15:00"},
+  {id:7,nombre:"Luis Ureña Salas",area:"Despacho",diasAcumulados:9,telefono:"",grupoHorario:"grupo1",almuerzoInicio:"11:00",almuerzoFin:"12:00"},
+  {id:8,nombre:"Andres Garcia Trujillo",area:"Despacho",diasAcumulados:7,telefono:"",grupoHorario:"grupo2",almuerzoInicio:"13:00",almuerzoFin:"14:00"},
+  {id:9,nombre:"Miguel Pastor Mejia",area:"Despacho",diasAcumulados:4,telefono:"",grupoHorario:"grupo1",almuerzoInicio:"13:00",almuerzoFin:"14:00"},
+  {id:10,nombre:"Rafael Castillo Arias",area:"Despacho",diasAcumulados:10,telefono:"",grupoHorario:"grupo2",almuerzoInicio:"12:00",almuerzoFin:"13:00"},
+  {id:11,nombre:"Carlos Araya Mora",area:"Despacho",diasAcumulados:10,telefono:"",grupoHorario:"grupo2",almuerzoInicio:"13:00",almuerzoFin:"14:00"},
+  {id:12,nombre:"Alvaro Moreno Rojas",area:"Despacho",diasAcumulados:11,telefono:"",grupoHorario:"grupo2",almuerzoInicio:"11:00",almuerzoFin:"12:00"},
+  {id:13,nombre:"Jorge Arrieta Bolaños",area:"Despacho",diasAcumulados:5,telefono:"",grupoHorario:"grupo2",almuerzoInicio:"13:00",almuerzoFin:"14:00"},
+  {id:14,nombre:"Willian Flores Pavon",area:"Despacho",diasAcumulados:3,telefono:"",grupoHorario:"grupo2",almuerzoInicio:"12:00",almuerzoFin:"13:00"},
+  {id:15,nombre:"Lus Diego Castro Fallas",area:"Despacho",diasAcumulados:2,telefono:"",grupoHorario:"grupo1",almuerzoInicio:"14:00",almuerzoFin:"15:00"},
+  {id:16,nombre:"Diego Jesus Brenes Sequeira",area:"Despacho",diasAcumulados:15,telefono:"",grupoHorario:"grupo1",almuerzoInicio:"14:00",almuerzoFin:"15:00"},
+  {id:17,nombre:"Humberto Molina Flores",area:"Despacho",diasAcumulados:8,telefono:"",grupoHorario:"grupo1",almuerzoInicio:"",almuerzoFin:""},
   {id:18,nombre:"Victor Borbon Avila",area:"Despacho",diasAcumulados:0,telefono:""},
-  {id:19,nombre:"Eddie Salgado Salazar",area:"Despacho",diasAcumulados:12,telefono:""},
-  {id:20,nombre:"Marco Gomez Mora",area:"Despacho",diasAcumulados:6,telefono:""},
+  {id:19,nombre:"Eddie Salgado Salazar",area:"Despacho",diasAcumulados:12,telefono:"",grupoHorario:"especial",almuerzoInicio:"12:00",almuerzoFin:"13:00",horarioEspecialDetalle:"L-K: 8:00-5:00 · M-V: 8:00-5:30 · S: 8:00-4:00 (siempre turno mañana)"},
+  {id:20,nombre:"Marco Gomez Mora",area:"Despacho",diasAcumulados:6,telefono:"",grupoHorario:"especial",almuerzoInicio:"12:00",almuerzoFin:"13:00",horarioEspecialDetalle:"K-M-J: 8:00-5:00 · L-V: 8:00-5:30 · S: 8:00-4:00"},
   {id:21,nombre:"Alexander Sanchez Vasquez",area:"Despacho",diasAcumulados:5,telefono:""},
-  {id:22,nombre:"German Montero Vargas",area:"Despacho",diasAcumulados:15,telefono:""},
+  {id:22,nombre:"German Montero Vargas",area:"Despacho",diasAcumulados:15,telefono:"",grupoHorario:"grupo1",almuerzoInicio:"11:00",almuerzoFin:"12:00"},
   {id:23,nombre:"German Mesen Bolivar",area:"Despacho",diasAcumulados:2,telefono:""},
-  {id:24,nombre:"Harol Ulate Fonseca",area:"Despacho",diasAcumulados:4,telefono:""},
+  {id:24,nombre:"Harol Ulate Fonseca",area:"Despacho",diasAcumulados:4,telefono:"",grupoHorario:"grupo2",almuerzoInicio:"",almuerzoFin:""},
   {id:25,nombre:"Marlen Rojas Mora",area:"Cajas",diasAcumulados:6,telefono:""},
   {id:26,nombre:"Kelly Rojas Cubero",area:"Cajas",diasAcumulados:5,telefono:""},
   {id:27,nombre:"Rudy Mora Valverde",area:"Transportes",diasAcumulados:2,telefono:""},
@@ -212,7 +266,13 @@ function App(){
   const [dbCalYear,setDbCalYear]=useState(new Date().getFullYear());
   const [dbCalDia,setDbCalDia]=useState(null);
   const [regForm,setRegForm]=useState({colabId:"",boleta:"",fechaInicio:"",fechaFin:"",mes:MESES[new Date().getMonth()],dias:"",estado:"confirmado"});
-  const [colabForm,setColabForm]=useState({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:""});
+  const [colabForm,setColabForm]=useState({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:""});
+
+  // UI horarios
+  const [horariosConfig,setHorariosConfig]=useState(()=>ls("ce_horarios_cfg",HORARIOS_CFG_INIT));
+  const [showHorarioCfgForm,setShowHorarioCfgForm]=useState(false);
+  const [horarioCfgForm,setHorarioCfgForm]=useState(horariosConfig);
+  const [horariosTab,setHorariosTab]=useState("grupos");
 
   // UI permisos
   const [showPermisoForm,setShowPermisoForm]=useState(false);
@@ -251,7 +311,18 @@ function App(){
     const ch=sb.channel("colabs_rt")
       .on("postgres_changes",{event:"*",schema:"public",table:"colaboradores"},async()=>{
         const {data}=await sb.from("colaboradores").select("*").order("id");
-        if(data){const mapped=data.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||""}));setColabs(mapped);sv("ce_colabs",mapped);}
+        if(data){const mapped=data.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||""}));setColabs(mapped);sv("ce_colabs",mapped);}
+      }).subscribe();
+    return()=>sb.removeChannel(ch);
+  },[sbOnline]);
+
+  // Realtime configuración de horarios
+  useEffect(()=>{
+    if(!sbOnline)return;
+    const ch=sb.channel("horarios_cfg_rt")
+      .on("postgres_changes",{event:"*",schema:"public",table:"horarios_config"},async()=>{
+        const {data}=await sb.from("horarios_config").select("*").eq("id",1).single();
+        if(data){const mapped={semanaAncla:data.semana_ancla,grupoTempranoAncla:data.grupo_temprano_ancla,lvTempranoEntrada:data.lv_temprano_entrada,lvTempranoSalida:data.lv_temprano_salida,lvTardeEntrada:data.lv_tarde_entrada,lvTardeSalida:data.lv_tarde_salida,sabTempranoEntrada:data.sab_temprano_entrada,sabTempranoSalida:data.sab_temprano_salida,sabTardeEntrada:data.sab_tarde_entrada,sabTardeSalida:data.sab_tarde_salida};setHorariosConfig(mapped);sv("ce_horarios_cfg",mapped);}
       }).subscribe();
     return()=>sb.removeChannel(ch);
   },[sbOnline]);
@@ -332,15 +403,24 @@ function App(){
         const {data:cd,error:ce}=await sb.from("colaboradores").select("*").order("id");
         if(ce)throw ce;
         if(cd&&cd.length>0){
-          const mapped=cd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||""}));
+          const mapped=cd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||""}));
           setColabs(mapped);sv("ce_colabs",mapped);
         } else {
           for(const c of COLABS_INIT){
-            await sb.from("colaboradores").insert({nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:""});
+            await sb.from("colaboradores").insert({nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:"",grupo_horario:c.grupoHorario||null,almuerzo_inicio:c.almuerzoInicio||null,almuerzo_fin:c.almuerzoFin||null,horario_especial_detalle:c.horarioEspecialDetalle||null,horario_especial_horas:c.horarioEspecialHoras||null});
           }
           const {data:nd}=await sb.from("colaboradores").select("*").order("id");
-          const mapped=nd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||""}));
+          const mapped=nd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||""}));
           setColabs(mapped);sv("ce_colabs",mapped);
+        }
+        // Configuración de horarios (fila única id=1)
+        const {data:hc}=await sb.from("horarios_config").select("*").eq("id",1).single();
+        if(hc){
+          const mapped={semanaAncla:hc.semana_ancla,grupoTempranoAncla:hc.grupo_temprano_ancla,lvTempranoEntrada:hc.lv_temprano_entrada,lvTempranoSalida:hc.lv_temprano_salida,lvTardeEntrada:hc.lv_tarde_entrada,lvTardeSalida:hc.lv_tarde_salida,sabTempranoEntrada:hc.sab_temprano_entrada,sabTempranoSalida:hc.sab_temprano_salida,sabTardeEntrada:hc.sab_tarde_entrada,sabTardeSalida:hc.sab_tarde_salida};
+          setHorariosConfig(mapped);sv("ce_horarios_cfg",mapped);
+        } else {
+          const c=HORARIOS_CFG_INIT;
+          await sb.from("horarios_config").insert({id:1,semana_ancla:c.semanaAncla,grupo_temprano_ancla:c.grupoTempranoAncla,lv_temprano_entrada:c.lvTempranoEntrada,lv_temprano_salida:c.lvTempranoSalida,lv_tarde_entrada:c.lvTardeEntrada,lv_tarde_salida:c.lvTardeSalida,sab_temprano_entrada:c.sabTempranoEntrada,sab_temprano_salida:c.sabTempranoSalida,sab_tarde_entrada:c.sabTardeEntrada,sab_tarde_salida:c.sabTardeSalida});
         }
         // Registros vacaciones
         const {data:rd}=await sb.from("registros").select("*").order("id");
@@ -443,9 +523,17 @@ function App(){
   }
   async function syncColab(c,isNew=false){
     if(!sbOnline)return c;
-    const payload={nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:c.telefono||""};
+    const payload={nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:c.telefono||"",grupo_horario:c.grupoHorario||null,almuerzo_inicio:c.almuerzoInicio||null,almuerzo_fin:c.almuerzoFin||null,horario_especial_detalle:c.horarioEspecialDetalle||null,horario_especial_horas:c.horarioEspecialHoras||null};
     if(isNew){const {data}=await sb.from("colaboradores").insert(payload).select().single();return data?{...c,id:data.id}:c;}
     else{await sb.from("colaboradores").update(payload).eq("id",c.id);return c;}
+  }
+  async function guardarHorariosConfig(){
+    setHorariosConfig(horarioCfgForm);sv("ce_horarios_cfg",horarioCfgForm);
+    if(sbOnline){
+      const c=horarioCfgForm;
+      await sb.from("horarios_config").update({semana_ancla:c.semanaAncla,grupo_temprano_ancla:c.grupoTempranoAncla,lv_temprano_entrada:c.lvTempranoEntrada,lv_temprano_salida:c.lvTempranoSalida,lv_tarde_entrada:c.lvTardeEntrada,lv_tarde_salida:c.lvTardeSalida,sab_temprano_entrada:c.sabTempranoEntrada,sab_temprano_salida:c.sabTempranoSalida,sab_tarde_entrada:c.sabTardeEntrada,sab_tarde_salida:c.sabTardeSalida}).eq("id",1);
+    }
+    setShowHorarioCfgForm(false);
   }
   function svRegs(d){setRegistros(d);sv("ce_regs",d);}
   async function toggleRRHH(id){
@@ -508,11 +596,12 @@ function App(){
 
   async function saveColab(){
     if(!colabForm.nombre.trim())return;
+    const payload={nombre:colabForm.nombre,area:colabForm.area,dias_acumulados:colabForm.diasAcumulados,telefono:colabForm.telefono||"",grupo_horario:colabForm.grupoHorario||null,almuerzo_inicio:colabForm.almuerzoInicio||null,almuerzo_fin:colabForm.almuerzoFin||null,horario_especial_detalle:colabForm.horarioEspecialDetalle||null,horario_especial_horas:colabForm.horarioEspecialHoras||null};
     if(colabEdit!==null){
-      if(sbOnline)await sb.from("colaboradores").update({nombre:colabForm.nombre,area:colabForm.area,dias_acumulados:colabForm.diasAcumulados,telefono:colabForm.telefono||""}).eq("id",colabEdit);
+      if(sbOnline)await sb.from("colaboradores").update(payload).eq("id",colabEdit);
       svColabs(colabs.map(c=>c.id===colabEdit?{...c,...colabForm}:c));
     } else {
-      if(sbOnline){const {data}=await sb.from("colaboradores").insert({nombre:colabForm.nombre,area:colabForm.area,dias_acumulados:colabForm.diasAcumulados,telefono:colabForm.telefono||""}).select().single();if(data)svColabs([...colabs,{id:data.id,...colabForm}]);}
+      if(sbOnline){const {data}=await sb.from("colaboradores").insert(payload).select().single();if(data)svColabs([...colabs,{id:data.id,...colabForm}]);}
       else svColabs([...colabs,{id:Date.now(),...colabForm}]);
     }
     setShowColabForm(false);setColabEdit(null);
@@ -746,7 +835,7 @@ function App(){
           <button onClick={()=>sb.auth.signOut()} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${C.g3}`,background:"transparent",color:C.textoM,fontSize:11,cursor:"pointer",marginTop:2}}>Salir</button>
         </div>
         <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:10}}>
-          {[["dashboard","⚡ Inicio"],["cafe","☕ Café"],["registros","📋 Vacaciones"],["permisos","📝 Permisos"],["incapacidades","🏥 Incapac."],["calendario","📅 Calendario"],["colaboradores","👥 Colabs"],["auditoria","🔍 Auditoría"]].map(([v,label])=>(
+          {[["dashboard","⚡ Inicio"],["cafe","☕ Café"],["registros","📋 Vacaciones"],["permisos","📝 Permisos"],["incapacidades","🏥 Incapac."],["calendario","📅 Calendario"],["colaboradores","👥 Colabs"],["horarios","🕐 Horarios"],["auditoria","🔍 Auditoría"]].map(([v,label])=>(
             <button key={v} onClick={()=>setView(v)} style={{padding:"7px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",background:view===v?C.naranja:C.g2,color:view===v?C.blanco:C.textoM}}>{label}</button>
           ))}
         </div>
@@ -952,7 +1041,7 @@ function App(){
         {view==="colaboradores"&&(
           <div>
             <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
-              <button onClick={()=>{setShowColabForm(true);setColabEdit(null);setColabForm({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:""});}} style={btnP}>+ Agregar</button>
+              <button onClick={()=>{setShowColabForm(true);setColabEdit(null);setColabForm({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:""});}} style={btnP}>+ Agregar</button>
             </div>
             {AREAS.map(area=>{
               const del_area=colabs.filter(c=>c.area===area);if(!del_area.length)return null;
@@ -972,7 +1061,7 @@ function App(){
                               <div style={{fontSize:11,color:C.textoS,marginTop:2}}>{registros.filter(r=>r.colabId===c.id&&!r.historico).length} registro(s) · {usados} usados · {permisos.filter(p=>p.colabId===c.id).length} permiso(s)</div>
                             </div>
                             <button onClick={()=>setExpandedColab(exp?null:c.id)} style={{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${C.azul}`,background:exp?C.azul:"transparent",color:exp?C.blanco:C.azul,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{exp?"▲":"＋ Ver"}</button>
-                            <button onClick={()=>{setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||""});setColabEdit(c.id);setShowColabForm(true);}} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
+                            <button onClick={()=>{setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||""});setColabEdit(c.id);setShowColabForm(true);}} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
                             <button onClick={()=>setDelConfirm({type:"colab",id:c.id})} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
                           </div>
                           {exp&&(
@@ -1031,6 +1120,134 @@ function App(){
             })}
           </div>
         )}
+
+        {/* ══ HORARIOS ══ */}
+        {view==="horarios"&&(()=>{
+          const lunesActual=semanaLunes(new Date());
+          const grupoTemprano=grupoTempranoDeSemana(horariosConfig);
+          const grupoTarde=grupoTemprano==="grupo1"?"grupo2":"grupo1";
+          const sinAsignar=colabs.filter(c=>!c.grupoHorario);
+          function BadgeHoras({c}){
+            const h=horasSemanalesColab(c,horariosConfig);
+            if(h===null)return null;
+            const ok=Math.abs(h-48)<0.01;
+            return<span style={{background:(ok?C.verde:C.rojo)+"20",color:ok?C.verde:C.rojo,borderRadius:20,padding:"3px 9px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{ok?"✓ ":"⚠️ "}{h}h/sem</span>;
+          }
+          function abrirEditarColab(c){
+            setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||""});
+            setColabEdit(c.id);setShowColabForm(true);
+          }
+          function FilaColab({c}){
+            return(
+              <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:C.g2,borderRadius:10,marginBottom:6}}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:AREA_COLOR[c.area]||C.textoS,flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:13}}>{c.nombre}</div>
+                  <div style={{fontSize:11,color:C.textoS,marginTop:1}}>
+                    {c.area}
+                    {c.almuerzoInicio&&c.almuerzoFin?` · 🍽 ${c.almuerzoInicio}–${c.almuerzoFin}`:""}
+                  </div>
+                </div>
+                <BadgeHoras c={c}/>
+                <button onClick={()=>abrirEditarColab(c)} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g1,cursor:"pointer",fontSize:12}}>✏️</button>
+              </div>
+            );
+          }
+          return(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.blanco}}>🕐 <span style={{color:C.azulL}}>Horarios</span></div>
+                <button onClick={()=>{setHorarioCfgForm(horariosConfig);setShowHorarioCfgForm(true);}} style={{padding:"8px 14px",borderRadius:8,border:`1.5px solid ${C.g3}`,background:C.g2,color:C.textoM,fontSize:12,fontWeight:700,cursor:"pointer"}}>⚙️ Configurar</button>
+              </div>
+
+              {/* Semana actual */}
+              <div style={{background:C.g1,borderRadius:14,padding:16,marginBottom:16,border:`1px solid ${C.g2}`}}>
+                <div style={{fontSize:11,color:C.azulL,fontWeight:800,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>📆 Semana actual · {fmtRangoSemana(lunesActual)}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  <div style={{background:C.naranja+"15",border:`1.5px solid ${C.naranja}40`,borderRadius:10,padding:"10px 12px"}}>
+                    <div style={{fontSize:10,color:C.naranja,fontWeight:700,textTransform:"uppercase"}}>{GRUPO_LABEL[grupoTemprano]} — entra temprano</div>
+                    <div style={{fontSize:13,color:C.texto,marginTop:4}}>L-V: {horariosConfig.lvTempranoEntrada} a {horariosConfig.lvTempranoSalida}</div>
+                    <div style={{fontSize:13,color:C.texto}}>Sáb: {horariosConfig.sabTempranoEntrada} a {horariosConfig.sabTempranoSalida}</div>
+                  </div>
+                  <div style={{background:C.azul+"15",border:`1.5px solid ${C.azul}40`,borderRadius:10,padding:"10px 12px"}}>
+                    <div style={{fontSize:10,color:C.azulL,fontWeight:700,textTransform:"uppercase"}}>{GRUPO_LABEL[grupoTarde]} — entra tarde</div>
+                    <div style={{fontSize:13,color:C.texto,marginTop:4}}>L-V: {horariosConfig.lvTardeEntrada} a {horariosConfig.lvTardeSalida}</div>
+                    <div style={{fontSize:13,color:C.texto}}>Sáb: {horariosConfig.sabTardeEntrada} a {horariosConfig.sabTardeSalida}</div>
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:C.textoS,marginTop:10}}>La próxima semana rotan automáticamente. El café (15+15 min) no se resta ni se suma a las horas.</div>
+              </div>
+
+              {/* Sub-tabs */}
+              <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+                {[["grupos",`Grupos rotativos (${colabs.filter(c=>c.grupoHorario==="grupo1"||c.grupoHorario==="grupo2").length})`],["especiales",`Horario fijo especial (${colabs.filter(c=>c.grupoHorario==="especial").length})`],["sinasignar",`Sin asignar (${sinAsignar.length})`]].map(([v,label])=>(
+                  <button key={v} onClick={()=>setHorariosTab(v)} style={{padding:"7px 12px",borderRadius:20,border:`1.5px solid ${horariosTab===v?C.azulL:C.g3}`,background:horariosTab===v?C.azulL+"20":"transparent",color:horariosTab===v?C.azulL:C.textoM,fontSize:12,fontWeight:700,cursor:"pointer"}}>{label}</button>
+                ))}
+              </div>
+
+              {horariosTab==="grupos"&&(
+                <div style={{display:"grid",gap:16}}>
+                  {["grupo1","grupo2"].map(g=>{
+                    const miembros=colabs.filter(c=>c.grupoHorario===g);
+                    const esTemprano=grupoTemprano===g;
+                    return(
+                      <div key={g} style={{background:C.g1,borderRadius:14,padding:16,border:`1px solid ${C.g2}`}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                          <div style={{fontWeight:800,fontSize:14,color:C.blanco}}>{GRUPO_LABEL[g]} <span style={{color:C.textoS,fontWeight:400}}>({miembros.length})</span></div>
+                          <span style={{background:(esTemprano?C.naranja:C.azul)+"20",color:esTemprano?C.naranja:C.azulL,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>{esTemprano?"☀️ Temprano esta semana":"🌙 Tarde esta semana"}</span>
+                        </div>
+                        {miembros.length===0
+                          ?<div style={{fontSize:12,color:C.textoS,padding:"10px 0"}}>Sin colaboradores asignados a este grupo.</div>
+                          :miembros.map(c=><FilaColab key={c.id} c={c}/>)
+                        }
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {horariosTab==="especiales"&&(
+                <div>
+                  {colabs.filter(c=>c.grupoHorario==="especial").length===0
+                    ?<Empty icon="🕐" msg="Sin colaboradores con horario fijo especial."/>
+                    :colabs.filter(c=>c.grupoHorario==="especial").map(c=>(
+                      <div key={c.id} style={{background:C.g1,borderRadius:12,padding:14,marginBottom:8,border:`1px solid ${C.g2}`}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <div style={{width:8,height:8,borderRadius:"50%",background:AREA_COLOR[c.area]||C.textoS,flexShrink:0}}/>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:600,fontSize:13}}>{c.nombre}</div>
+                            <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
+                          </div>
+                          <BadgeHoras c={c}/>
+                          <button onClick={()=>abrirEditarColab(c)} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
+                        </div>
+                        {c.horarioEspecialDetalle&&<div style={{fontSize:12,color:C.textoM,marginTop:8,background:C.g2,borderRadius:8,padding:"8px 10px"}}>{c.horarioEspecialDetalle}</div>}
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+
+              {horariosTab==="sinasignar"&&(
+                <div>
+                  {sinAsignar.length===0
+                    ?<Empty icon="✅" msg="Todos los colaboradores tienen un horario asignado."/>
+                    :sinAsignar.map(c=>(
+                      <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:C.g1,borderRadius:10,marginBottom:6,border:`1px solid ${C.g2}`}}>
+                        <div style={{width:8,height:8,borderRadius:"50%",background:AREA_COLOR[c.area]||C.textoS,flexShrink:0}}/>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:600,fontSize:13}}>{c.nombre}</div>
+                          <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
+                        </div>
+                        <button onClick={()=>abrirEditarColab(c)} style={{padding:"6px 12px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:11,fontWeight:700,cursor:"pointer"}}>Asignar horario</button>
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ══ INCAPACIDADES ══ */}
         {view==="incapacidades"&&(
@@ -1604,7 +1821,69 @@ function App(){
           </Field>
           <Field label="Días acumulados actuales"><input type="number" min="0" value={colabForm.diasAcumulados} onChange={e=>setColabForm(p=>({...p,diasAcumulados:parseInt(e.target.value)||0}))} style={inp}/></Field>
           <Field label="Teléfono WhatsApp"><input type="tel" value={colabForm.telefono||""} onChange={e=>setColabForm(p=>({...p,telefono:e.target.value}))} style={inp} placeholder="Ej. 88001234"/></Field>
+
+          <div style={{borderTop:`1px solid ${C.g3}`,margin:"14px 0",paddingTop:14}}>
+            <Field label="Grupo de horario">
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}>
+                {[["","Sin asignar"],["grupo1","Grupo 1 (rotativo)"],["grupo2","Grupo 2 (rotativo)"],["especial","Horario fijo especial"]].map(([v,label])=>(
+                  <button key={v} onClick={()=>setColabForm(p=>({...p,grupoHorario:v}))} style={{padding:"8px",borderRadius:8,cursor:"pointer",fontSize:12,border:`2px solid ${colabForm.grupoHorario===v?C.azulL:C.g3}`,background:colabForm.grupoHorario===v?C.azulL+"20":"transparent",color:colabForm.grupoHorario===v?C.azulL:C.textoM,fontWeight:colabForm.grupoHorario===v?700:400}}>{label}</button>
+                ))}
+              </div>
+            </Field>
+            {(colabForm.grupoHorario==="grupo1"||colabForm.grupoHorario==="grupo2")&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <Field label="Almuerzo - salida"><input type="time" value={colabForm.almuerzoInicio||""} onChange={e=>setColabForm(p=>({...p,almuerzoInicio:e.target.value}))} style={inp}/></Field>
+                <Field label="Almuerzo - entrada"><input type="time" value={colabForm.almuerzoFin||""} onChange={e=>setColabForm(p=>({...p,almuerzoFin:e.target.value}))} style={inp}/></Field>
+              </div>
+            )}
+            {colabForm.grupoHorario==="especial"&&(
+              <>
+                <Field label="Detalle del horario especial">
+                  <textarea value={colabForm.horarioEspecialDetalle||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialDetalle:e.target.value}))} style={{...inp,minHeight:60,resize:"vertical"}} placeholder="Ej. L-K 8:00-5:00 / M-V 8:00-5:30 / S 8:00-4:00"/>
+                </Field>
+                <Field label="Horas semanales (para control de 48h)">
+                  <input type="number" step="0.25" min="0" value={colabForm.horarioEspecialHoras||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialHoras:e.target.value}))} style={inp} placeholder="Ej. 48"/>
+                </Field>
+              </>
+            )}
+          </div>
+
           <div style={{display:"flex",gap:10,marginTop:8}}><button onClick={saveColab} style={btnP}>Guardar</button><button onClick={()=>{setShowColabForm(false);setColabEdit(null);}} style={btnS}>Cancelar</button></div>
+        </Modal>
+      )}
+
+      {showHorarioCfgForm&&(
+        <Modal title="Configurar horarios rotativos" onClose={()=>setShowHorarioCfgForm(false)}>
+          <div style={{background:C.azul+"15",border:`1px solid ${C.azul}40`,borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.azulL}}>
+            Definí una semana de referencia y qué grupo entra temprano esa semana. Desde ahí la app calcula sola la rotación de cualquier otra semana.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Field label="Semana de referencia (lunes)"><input type="date" value={horarioCfgForm.semanaAncla} onChange={e=>setHorarioCfgForm(p=>({...p,semanaAncla:semanaLunes(e.target.value)}))} style={inp}/></Field>
+            <Field label="Grupo temprano esa semana">
+              <select value={horarioCfgForm.grupoTempranoAncla} onChange={e=>setHorarioCfgForm(p=>({...p,grupoTempranoAncla:e.target.value}))} style={inp}>
+                <option value="grupo1">Grupo 1</option>
+                <option value="grupo2">Grupo 2</option>
+              </select>
+            </Field>
+          </div>
+
+          <div style={{fontSize:10,color:C.naranja,fontWeight:700,textTransform:"uppercase",letterSpacing:1,margin:"16px 0 8px"}}>☀️ Horario "temprano"</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Field label="Entrada L-V"><input type="time" value={horarioCfgForm.lvTempranoEntrada} onChange={e=>setHorarioCfgForm(p=>({...p,lvTempranoEntrada:e.target.value}))} style={inp}/></Field>
+            <Field label="Salida L-V"><input type="time" value={horarioCfgForm.lvTempranoSalida} onChange={e=>setHorarioCfgForm(p=>({...p,lvTempranoSalida:e.target.value}))} style={inp}/></Field>
+            <Field label="Entrada Sábado"><input type="time" value={horarioCfgForm.sabTempranoEntrada} onChange={e=>setHorarioCfgForm(p=>({...p,sabTempranoEntrada:e.target.value}))} style={inp}/></Field>
+            <Field label="Salida Sábado"><input type="time" value={horarioCfgForm.sabTempranoSalida} onChange={e=>setHorarioCfgForm(p=>({...p,sabTempranoSalida:e.target.value}))} style={inp}/></Field>
+          </div>
+
+          <div style={{fontSize:10,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,margin:"16px 0 8px"}}>🌙 Horario "tarde"</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Field label="Entrada L-V"><input type="time" value={horarioCfgForm.lvTardeEntrada} onChange={e=>setHorarioCfgForm(p=>({...p,lvTardeEntrada:e.target.value}))} style={inp}/></Field>
+            <Field label="Salida L-V"><input type="time" value={horarioCfgForm.lvTardeSalida} onChange={e=>setHorarioCfgForm(p=>({...p,lvTardeSalida:e.target.value}))} style={inp}/></Field>
+            <Field label="Entrada Sábado"><input type="time" value={horarioCfgForm.sabTardeEntrada} onChange={e=>setHorarioCfgForm(p=>({...p,sabTardeEntrada:e.target.value}))} style={inp}/></Field>
+            <Field label="Salida Sábado"><input type="time" value={horarioCfgForm.sabTardeSalida} onChange={e=>setHorarioCfgForm(p=>({...p,sabTardeSalida:e.target.value}))} style={inp}/></Field>
+          </div>
+
+          <div style={{display:"flex",gap:10,marginTop:16}}><button onClick={guardarHorariosConfig} style={btnP}>Guardar configuración</button><button onClick={()=>setShowHorarioCfgForm(false)} style={btnS}>Cancelar</button></div>
         </Modal>
       )}
 
