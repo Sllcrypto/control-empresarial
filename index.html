@@ -147,9 +147,22 @@ function horarioDeGrupo(cfg,grupoId,fechaRef){
     ?{tipo:"Temprano",lv:{entrada:cfg.lvTempranoEntrada,salida:cfg.lvTempranoSalida},sab:{entrada:cfg.sabTempranoEntrada,salida:cfg.sabTempranoSalida},sabAlmuerzo:{entrada:cfg.sabAlmTempranoInicio,salida:cfg.sabAlmTempranoFin}}
     :{tipo:"Tarde",lv:{entrada:cfg.lvTardeEntrada,salida:cfg.lvTardeSalida},sab:{entrada:cfg.sabTardeEntrada,salida:cfg.sabTardeSalida},sabAlmuerzo:{entrada:cfg.sabAlmTardeInicio,salida:cfg.sabAlmTardeFin}};
 }
+const DIAS_SEMANA = [["lun","Lunes"],["mar","Martes"],["mie","Miércoles"],["jue","Jueves"],["vie","Viernes"],["sab","Sábado"]];
 function horasSemanalesColab(c,cfg){
   if(!c.grupoHorario)return null;
-  if(c.grupoHorario==="especial")return c.horarioEspecialHoras?Number(c.horarioEspecialHoras):null;
+  if(c.grupoHorario==="especial"){
+    const dias=c.horarioEspecialDias||{};
+    const almLvMin=(c.almuerzoInicio&&c.almuerzoFin)?minutosEntre(c.almuerzoInicio,c.almuerzoFin):0;
+    const almSabMin=(cfg.sabAlmEspecialInicio&&cfg.sabAlmEspecialFin)?minutosEntre(cfg.sabAlmEspecialInicio,cfg.sabAlmEspecialFin):0;
+    let total=0,algunDia=false;
+    ["lun","mar","mie","jue","vie"].forEach(d=>{
+      const dia=dias[d];
+      if(dia&&dia.entrada&&dia.salida){algunDia=true;total+=Math.max(0,minutosEntre(dia.entrada,dia.salida)-almLvMin);}
+    });
+    if(dias.sab&&dias.sab.entrada&&dias.sab.salida){algunDia=true;total+=Math.max(0,minutosEntre(dias.sab.entrada,dias.sab.salida)-almSabMin);}
+    if(algunDia)return +(total/60).toFixed(2);
+    return c.horarioEspecialHoras?Number(c.horarioEspecialHoras):null; // respaldo manual si no se llenó la cuadrícula
+  }
   if(c.grupoHorario!=="grupo1"&&c.grupoHorario!=="grupo2")return null;
   const h=horarioDeGrupo(cfg,c.grupoHorario);
   const lvMin=minutosEntre(h.lv.entrada,h.lv.salida)*5;
@@ -273,7 +286,7 @@ function App(){
   const [dbCalYear,setDbCalYear]=useState(new Date().getFullYear());
   const [dbCalDia,setDbCalDia]=useState(null);
   const [regForm,setRegForm]=useState({colabId:"",boleta:"",fechaInicio:"",fechaFin:"",mes:MESES[new Date().getMonth()],dias:"",estado:"confirmado"});
-  const [colabForm,setColabForm]=useState({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:""});
+  const [colabForm,setColabForm]=useState({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:"",horarioEspecialDias:{}});
 
   // UI horarios
   const [horariosConfig,setHorariosConfig]=useState(()=>ls("ce_horarios_cfg",HORARIOS_CFG_INIT));
@@ -318,7 +331,7 @@ function App(){
     const ch=sb.channel("colabs_rt")
       .on("postgres_changes",{event:"*",schema:"public",table:"colaboradores"},async()=>{
         const {data}=await sb.from("colaboradores").select("*").order("id");
-        if(data){const mapped=data.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||""}));setColabs(mapped);sv("ce_colabs",mapped);}
+        if(data){const mapped=data.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||"",horarioEspecialDias:c.horario_especial_dias||{}}));setColabs(mapped);sv("ce_colabs",mapped);}
       }).subscribe();
     return()=>sb.removeChannel(ch);
   },[sbOnline]);
@@ -410,14 +423,14 @@ function App(){
         const {data:cd,error:ce}=await sb.from("colaboradores").select("*").order("id");
         if(ce)throw ce;
         if(cd&&cd.length>0){
-          const mapped=cd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||""}));
+          const mapped=cd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||"",horarioEspecialDias:c.horario_especial_dias||{}}));
           setColabs(mapped);sv("ce_colabs",mapped);
         } else {
           for(const c of COLABS_INIT){
-            await sb.from("colaboradores").insert({nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:"",grupo_horario:c.grupoHorario||null,almuerzo_inicio:c.almuerzoInicio||null,almuerzo_fin:c.almuerzoFin||null,horario_especial_detalle:c.horarioEspecialDetalle||null,horario_especial_horas:c.horarioEspecialHoras||null});
+            await sb.from("colaboradores").insert({nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:"",grupo_horario:c.grupoHorario||null,almuerzo_inicio:c.almuerzoInicio||null,almuerzo_fin:c.almuerzoFin||null,horario_especial_detalle:c.horarioEspecialDetalle||null,horario_especial_horas:c.horarioEspecialHoras||null,horario_especial_dias:c.horarioEspecialDias||null});
           }
           const {data:nd}=await sb.from("colaboradores").select("*").order("id");
-          const mapped=nd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||""}));
+          const mapped=nd.map(c=>({id:c.id,nombre:c.nombre,area:c.area,diasAcumulados:c.dias_acumulados,telefono:c.telefono||"",grupoHorario:c.grupo_horario||"",almuerzoInicio:c.almuerzo_inicio||"",almuerzoFin:c.almuerzo_fin||"",horarioEspecialDetalle:c.horario_especial_detalle||"",horarioEspecialHoras:c.horario_especial_horas||"",horarioEspecialDias:c.horario_especial_dias||{}}));
           setColabs(mapped);sv("ce_colabs",mapped);
         }
         // Configuración de horarios (fila única id=1)
@@ -530,7 +543,7 @@ function App(){
   }
   async function syncColab(c,isNew=false){
     if(!sbOnline)return c;
-    const payload={nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:c.telefono||"",grupo_horario:c.grupoHorario||null,almuerzo_inicio:c.almuerzoInicio||null,almuerzo_fin:c.almuerzoFin||null,horario_especial_detalle:c.horarioEspecialDetalle||null,horario_especial_horas:c.horarioEspecialHoras||null};
+    const payload={nombre:c.nombre,area:c.area,dias_acumulados:c.diasAcumulados,telefono:c.telefono||"",grupo_horario:c.grupoHorario||null,almuerzo_inicio:c.almuerzoInicio||null,almuerzo_fin:c.almuerzoFin||null,horario_especial_detalle:c.horarioEspecialDetalle||null,horario_especial_horas:c.horarioEspecialHoras||null,horario_especial_dias:c.horarioEspecialDias||null};
     if(isNew){const {data}=await sb.from("colaboradores").insert(payload).select().single();return data?{...c,id:data.id}:c;}
     else{await sb.from("colaboradores").update(payload).eq("id",c.id);return c;}
   }
@@ -603,7 +616,7 @@ function App(){
 
   async function saveColab(){
     if(!colabForm.nombre.trim())return;
-    const payload={nombre:colabForm.nombre,area:colabForm.area,dias_acumulados:colabForm.diasAcumulados,telefono:colabForm.telefono||"",grupo_horario:colabForm.grupoHorario||null,almuerzo_inicio:colabForm.almuerzoInicio||null,almuerzo_fin:colabForm.almuerzoFin||null,horario_especial_detalle:colabForm.horarioEspecialDetalle||null,horario_especial_horas:colabForm.horarioEspecialHoras||null};
+    const payload={nombre:colabForm.nombre,area:colabForm.area,dias_acumulados:colabForm.diasAcumulados,telefono:colabForm.telefono||"",grupo_horario:colabForm.grupoHorario||null,almuerzo_inicio:colabForm.almuerzoInicio||null,almuerzo_fin:colabForm.almuerzoFin||null,horario_especial_detalle:colabForm.horarioEspecialDetalle||null,horario_especial_horas:colabForm.horarioEspecialHoras||null,horario_especial_dias:colabForm.horarioEspecialDias||null};
     if(colabEdit!==null){
       if(sbOnline)await sb.from("colaboradores").update(payload).eq("id",colabEdit);
       svColabs(colabs.map(c=>c.id===colabEdit?{...c,...colabForm}:c));
@@ -1048,7 +1061,7 @@ function App(){
         {view==="colaboradores"&&(
           <div>
             <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
-              <button onClick={()=>{setShowColabForm(true);setColabEdit(null);setColabForm({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:""});}} style={btnP}>+ Agregar</button>
+              <button onClick={()=>{setShowColabForm(true);setColabEdit(null);setColabForm({nombre:"",area:AREAS[0],diasAcumulados:0,telefono:"",grupoHorario:"",almuerzoInicio:"",almuerzoFin:"",horarioEspecialDetalle:"",horarioEspecialHoras:"",horarioEspecialDias:{}});}} style={btnP}>+ Agregar</button>
             </div>
             {AREAS.map(area=>{
               const del_area=colabs.filter(c=>c.area===area);if(!del_area.length)return null;
@@ -1068,7 +1081,7 @@ function App(){
                               <div style={{fontSize:11,color:C.textoS,marginTop:2}}>{registros.filter(r=>r.colabId===c.id&&!r.historico).length} registro(s) · {usados} usados · {permisos.filter(p=>p.colabId===c.id).length} permiso(s)</div>
                             </div>
                             <button onClick={()=>setExpandedColab(exp?null:c.id)} style={{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${C.azul}`,background:exp?C.azul:"transparent",color:exp?C.blanco:C.azul,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{exp?"▲":"＋ Ver"}</button>
-                            <button onClick={()=>{setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||""});setColabEdit(c.id);setShowColabForm(true);}} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
+                            <button onClick={()=>{setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||"",horarioEspecialDias:c.horarioEspecialDias||{}});setColabEdit(c.id);setShowColabForm(true);}} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
                             <button onClick={()=>setDelConfirm({type:"colab",id:c.id})} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
                           </div>
                           {exp&&(
@@ -1141,7 +1154,7 @@ function App(){
             return<span style={{background:(ok?C.verde:C.rojo)+"20",color:ok?C.verde:C.rojo,borderRadius:20,padding:"3px 9px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{ok?"✓ ":"⚠️ "}{h}h/sem</span>;
           }
           function abrirEditarColab(c){
-            setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||""});
+            setColabForm({nombre:c.nombre,area:c.area,diasAcumulados:c.diasAcumulados,telefono:c.telefono||"",grupoHorario:c.grupoHorario||"",almuerzoInicio:c.almuerzoInicio||"",almuerzoFin:c.almuerzoFin||"",horarioEspecialDetalle:c.horarioEspecialDetalle||"",horarioEspecialHoras:c.horarioEspecialHoras||"",horarioEspecialDias:c.horarioEspecialDias||{}});
             setColabEdit(c.id);setShowColabForm(true);
           }
           function FilaColab({c}){
@@ -1157,6 +1170,7 @@ function App(){
                 </div>
                 <BadgeHoras c={c}/>
                 <button onClick={()=>abrirEditarColab(c)} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g1,cursor:"pointer",fontSize:12}}>✏️</button>
+                <button onClick={()=>setDelConfirm({type:"colab",id:c.id})} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g1,cursor:"pointer",fontSize:12}}>🗑️</button>
               </div>
             );
           }
@@ -1229,8 +1243,16 @@ function App(){
                           </div>
                           <BadgeHoras c={c}/>
                           <button onClick={()=>abrirEditarColab(c)} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✏️</button>
+                          <button onClick={()=>setDelConfirm({type:"colab",id:c.id})} style={{padding:"4px 7px",borderRadius:6,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
                         </div>
-                        {c.horarioEspecialDetalle&&<div style={{fontSize:12,color:C.textoM,marginTop:8,background:C.g2,borderRadius:8,padding:"8px 10px"}}>{c.horarioEspecialDetalle}</div>}
+                        {c.horarioEspecialDias&&Object.keys(c.horarioEspecialDias).some(d=>c.horarioEspecialDias[d]?.entrada)&&(
+                          <div style={{fontSize:12,color:C.textoM,marginTop:8,background:C.g2,borderRadius:8,padding:"8px 10px",display:"flex",flexWrap:"wrap",gap:"4px 14px"}}>
+                            {DIAS_SEMANA.filter(([dk])=>c.horarioEspecialDias[dk]?.entrada&&c.horarioEspecialDias[dk]?.salida).map(([dk,label])=>(
+                              <span key={dk}><b>{label.slice(0,3)}:</b> {c.horarioEspecialDias[dk].entrada}–{c.horarioEspecialDias[dk].salida}</span>
+                            ))}
+                          </div>
+                        )}
+                        {c.horarioEspecialDetalle&&<div style={{fontSize:11,color:C.textoS,marginTop:6,fontStyle:"italic"}}>{c.horarioEspecialDetalle}</div>}
                       </div>
                     ))
                   }
@@ -1249,6 +1271,7 @@ function App(){
                           <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
                         </div>
                         <button onClick={()=>abrirEditarColab(c)} style={{padding:"6px 12px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:11,fontWeight:700,cursor:"pointer"}}>Asignar horario</button>
+                        <button onClick={()=>setDelConfirm({type:"colab",id:c.id})} style={{padding:"6px 9px",borderRadius:8,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
                       </div>
                     ))
                   }
@@ -1847,10 +1870,28 @@ function App(){
             )}
             {colabForm.grupoHorario==="especial"&&(
               <>
-                <Field label="Detalle del horario especial">
-                  <textarea value={colabForm.horarioEspecialDetalle||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialDetalle:e.target.value}))} style={{...inp,minHeight:60,resize:"vertical"}} placeholder="Ej. L-K 8:00-5:00 / M-V 8:00-5:30 / S 8:00-4:00"/>
+                <Field label="Almuerzo L-V - salida / entrada">
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <input type="time" value={colabForm.almuerzoInicio||""} onChange={e=>setColabForm(p=>({...p,almuerzoInicio:e.target.value}))} style={inp}/>
+                    <input type="time" value={colabForm.almuerzoFin||""} onChange={e=>setColabForm(p=>({...p,almuerzoFin:e.target.value}))} style={inp}/>
+                  </div>
                 </Field>
-                <Field label="Horas semanales (para control de 48h)">
+                <div style={{fontSize:11,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,margin:"12px 0 6px"}}>Horario por día (dejá vacío el día que no trabaja)</div>
+                {DIAS_SEMANA.map(([dk,label])=>{
+                  const dia=colabForm.horarioEspecialDias?.[dk]||{entrada:"",salida:""};
+                  return(
+                    <div key={dk} style={{display:"grid",gridTemplateColumns:"70px 1fr 1fr",gap:8,alignItems:"center",marginBottom:6}}>
+                      <div style={{fontSize:12,color:C.textoM,fontWeight:600}}>{label}</div>
+                      <input type="time" value={dia.entrada||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialDias:{...p.horarioEspecialDias,[dk]:{...dia,entrada:e.target.value}}}))} style={inp} placeholder="Entrada"/>
+                      <input type="time" value={dia.salida||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialDias:{...p.horarioEspecialDias,[dk]:{...dia,salida:e.target.value}}}))} style={inp} placeholder="Salida"/>
+                    </div>
+                  );
+                })}
+                <div style={{fontSize:11,color:C.textoS,margin:"4px 0 12px"}}>El sábado usa el almuerzo de horario especial configurado en ⚙️ Configurar (por defecto 1:00pm). Con la cuadrícula llena, las horas semanales se calculan solas.</div>
+                <Field label="Notas / referencia (opcional)">
+                  <textarea value={colabForm.horarioEspecialDetalle||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialDetalle:e.target.value}))} style={{...inp,minHeight:44,resize:"vertical"}} placeholder="Ej. rota cada 15 días con Fulano"/>
+                </Field>
+                <Field label="Horas semanales manuales (solo si NO llenás la cuadrícula)">
                   <input type="number" step="0.25" min="0" value={colabForm.horarioEspecialHoras||""} onChange={e=>setColabForm(p=>({...p,horarioEspecialHoras:e.target.value}))} style={inp} placeholder="Ej. 48"/>
                 </Field>
               </>
