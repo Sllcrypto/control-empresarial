@@ -113,10 +113,13 @@ function abrirWhatsApp(telefono,mensaje){
 const GRUPO_LABEL = {grupo1:"Grupo 1",grupo2:"Grupo 2"};
 const HORARIOS_CFG_INIT = {
   semanaAncla:"2026-08-10", grupoTempranoAncla:"grupo2",
-  lvTempranoEntrada:"07:12", lvTempranoSalida:"16:45",
+  lvTempranoEntrada:"07:15", lvTempranoSalida:"16:45",
   lvTardeEntrada:"08:15", lvTardeSalida:"17:45",
   sabTempranoEntrada:"07:30", sabTempranoSalida:"14:00",
   sabTardeEntrada:"09:30", sabTardeSalida:"16:00",
+  sabAlmTempranoInicio:"11:00", sabAlmTempranoFin:"12:00",
+  sabAlmTardeInicio:"12:00", sabAlmTardeFin:"13:00",
+  sabAlmEspecialInicio:"13:00", sabAlmEspecialFin:"14:00",
 };
 function semanaLunes(fecha){
   const dt=new Date(fecha);dt.setHours(0,0,0,0);
@@ -141,8 +144,8 @@ function grupoTempranoDeSemana(cfg,fechaRef){
 function horarioDeGrupo(cfg,grupoId,fechaRef){
   const temprano=grupoTempranoDeSemana(cfg,fechaRef)===grupoId;
   return temprano
-    ?{tipo:"Temprano",lv:{entrada:cfg.lvTempranoEntrada,salida:cfg.lvTempranoSalida},sab:{entrada:cfg.sabTempranoEntrada,salida:cfg.sabTempranoSalida}}
-    :{tipo:"Tarde",lv:{entrada:cfg.lvTardeEntrada,salida:cfg.lvTardeSalida},sab:{entrada:cfg.sabTardeEntrada,salida:cfg.sabTardeSalida}};
+    ?{tipo:"Temprano",lv:{entrada:cfg.lvTempranoEntrada,salida:cfg.lvTempranoSalida},sab:{entrada:cfg.sabTempranoEntrada,salida:cfg.sabTempranoSalida},sabAlmuerzo:{entrada:cfg.sabAlmTempranoInicio,salida:cfg.sabAlmTempranoFin}}
+    :{tipo:"Tarde",lv:{entrada:cfg.lvTardeEntrada,salida:cfg.lvTardeSalida},sab:{entrada:cfg.sabTardeEntrada,salida:cfg.sabTardeSalida},sabAlmuerzo:{entrada:cfg.sabAlmTardeInicio,salida:cfg.sabAlmTardeFin}};
 }
 function horasSemanalesColab(c,cfg){
   if(!c.grupoHorario)return null;
@@ -150,9 +153,11 @@ function horasSemanalesColab(c,cfg){
   if(c.grupoHorario!=="grupo1"&&c.grupoHorario!=="grupo2")return null;
   const h=horarioDeGrupo(cfg,c.grupoHorario);
   const lvMin=minutosEntre(h.lv.entrada,h.lv.salida)*5;
-  const sabMin=minutosEntre(h.sab.entrada,h.sab.salida);
-  const almMin=(c.almuerzoInicio&&c.almuerzoFin)?minutosEntre(c.almuerzoInicio,c.almuerzoFin)*5:0;
-  const total=lvMin+sabMin-almMin;
+  const almLvMin=(c.almuerzoInicio&&c.almuerzoFin)?minutosEntre(c.almuerzoInicio,c.almuerzoFin)*5:0;
+  const sabBrutoMin=minutosEntre(h.sab.entrada,h.sab.salida);
+  const almSabMin=minutosEntre(h.sabAlmuerzo.entrada,h.sabAlmuerzo.salida);
+  const sabMin=sabBrutoMin-almSabMin;
+  const total=lvMin-almLvMin+sabMin;
   return +(total/60).toFixed(2);
 }
 function fmtRangoSemana(lunesStr){
@@ -193,6 +198,8 @@ const COLABS_INIT = [
   {id:28,nombre:"Mercado Aguirre Olman",area:"Transportes",diasAcumulados:28,telefono:""},
   {id:29,nombre:"Alfonso Roy Gomez",area:"Transportes",diasAcumulados:9,telefono:""},
   {id:30,nombre:"Oscar Fallas Hidalgo",area:"Transportes",diasAcumulados:7,telefono:""},
+  {id:31,nombre:"Gilberth (completar apellidos)",area:"Despacho",diasAcumulados:0,telefono:"",grupoHorario:"especial",almuerzoInicio:"13:00",almuerzoFin:"14:00",horarioEspecialDetalle:"L-K: 8:00-5:30 · M-J-V: 8:00-5:00 · S: 8:00-4:00"},
+  {id:32,nombre:"Rafael Jimenez (completar apellidos)",area:"Despacho",diasAcumulados:0,telefono:"",grupoHorario:"especial",almuerzoInicio:"11:00",almuerzoFin:"12:00",horarioEspecialDetalle:"Siempre turno regular en la mañana (horario fijo, no rota)"},
 ];
 
 const REGS_INIT = [
@@ -322,7 +329,7 @@ function App(){
     const ch=sb.channel("horarios_cfg_rt")
       .on("postgres_changes",{event:"*",schema:"public",table:"horarios_config"},async()=>{
         const {data}=await sb.from("horarios_config").select("*").eq("id",1).single();
-        if(data){const mapped={semanaAncla:data.semana_ancla,grupoTempranoAncla:data.grupo_temprano_ancla,lvTempranoEntrada:data.lv_temprano_entrada,lvTempranoSalida:data.lv_temprano_salida,lvTardeEntrada:data.lv_tarde_entrada,lvTardeSalida:data.lv_tarde_salida,sabTempranoEntrada:data.sab_temprano_entrada,sabTempranoSalida:data.sab_temprano_salida,sabTardeEntrada:data.sab_tarde_entrada,sabTardeSalida:data.sab_tarde_salida};setHorariosConfig(mapped);sv("ce_horarios_cfg",mapped);}
+        if(data){const mapped={semanaAncla:data.semana_ancla,grupoTempranoAncla:data.grupo_temprano_ancla,lvTempranoEntrada:data.lv_temprano_entrada,lvTempranoSalida:data.lv_temprano_salida,lvTardeEntrada:data.lv_tarde_entrada,lvTardeSalida:data.lv_tarde_salida,sabTempranoEntrada:data.sab_temprano_entrada,sabTempranoSalida:data.sab_temprano_salida,sabTardeEntrada:data.sab_tarde_entrada,sabTardeSalida:data.sab_tarde_salida,sabAlmTempranoInicio:data.sab_alm_temprano_inicio,sabAlmTempranoFin:data.sab_alm_temprano_fin,sabAlmTardeInicio:data.sab_alm_tarde_inicio,sabAlmTardeFin:data.sab_alm_tarde_fin,sabAlmEspecialInicio:data.sab_alm_especial_inicio,sabAlmEspecialFin:data.sab_alm_especial_fin};setHorariosConfig(mapped);sv("ce_horarios_cfg",mapped);}
       }).subscribe();
     return()=>sb.removeChannel(ch);
   },[sbOnline]);
@@ -416,11 +423,11 @@ function App(){
         // Configuración de horarios (fila única id=1)
         const {data:hc}=await sb.from("horarios_config").select("*").eq("id",1).single();
         if(hc){
-          const mapped={semanaAncla:hc.semana_ancla,grupoTempranoAncla:hc.grupo_temprano_ancla,lvTempranoEntrada:hc.lv_temprano_entrada,lvTempranoSalida:hc.lv_temprano_salida,lvTardeEntrada:hc.lv_tarde_entrada,lvTardeSalida:hc.lv_tarde_salida,sabTempranoEntrada:hc.sab_temprano_entrada,sabTempranoSalida:hc.sab_temprano_salida,sabTardeEntrada:hc.sab_tarde_entrada,sabTardeSalida:hc.sab_tarde_salida};
+          const mapped={semanaAncla:hc.semana_ancla,grupoTempranoAncla:hc.grupo_temprano_ancla,lvTempranoEntrada:hc.lv_temprano_entrada,lvTempranoSalida:hc.lv_temprano_salida,lvTardeEntrada:hc.lv_tarde_entrada,lvTardeSalida:hc.lv_tarde_salida,sabTempranoEntrada:hc.sab_temprano_entrada,sabTempranoSalida:hc.sab_temprano_salida,sabTardeEntrada:hc.sab_tarde_entrada,sabTardeSalida:hc.sab_tarde_salida,sabAlmTempranoInicio:hc.sab_alm_temprano_inicio,sabAlmTempranoFin:hc.sab_alm_temprano_fin,sabAlmTardeInicio:hc.sab_alm_tarde_inicio,sabAlmTardeFin:hc.sab_alm_tarde_fin,sabAlmEspecialInicio:hc.sab_alm_especial_inicio,sabAlmEspecialFin:hc.sab_alm_especial_fin};
           setHorariosConfig(mapped);sv("ce_horarios_cfg",mapped);
         } else {
           const c=HORARIOS_CFG_INIT;
-          await sb.from("horarios_config").insert({id:1,semana_ancla:c.semanaAncla,grupo_temprano_ancla:c.grupoTempranoAncla,lv_temprano_entrada:c.lvTempranoEntrada,lv_temprano_salida:c.lvTempranoSalida,lv_tarde_entrada:c.lvTardeEntrada,lv_tarde_salida:c.lvTardeSalida,sab_temprano_entrada:c.sabTempranoEntrada,sab_temprano_salida:c.sabTempranoSalida,sab_tarde_entrada:c.sabTardeEntrada,sab_tarde_salida:c.sabTardeSalida});
+          await sb.from("horarios_config").insert({id:1,semana_ancla:c.semanaAncla,grupo_temprano_ancla:c.grupoTempranoAncla,lv_temprano_entrada:c.lvTempranoEntrada,lv_temprano_salida:c.lvTempranoSalida,lv_tarde_entrada:c.lvTardeEntrada,lv_tarde_salida:c.lvTardeSalida,sab_temprano_entrada:c.sabTempranoEntrada,sab_temprano_salida:c.sabTempranoSalida,sab_tarde_entrada:c.sabTardeEntrada,sab_tarde_salida:c.sabTardeSalida,sab_alm_temprano_inicio:c.sabAlmTempranoInicio,sab_alm_temprano_fin:c.sabAlmTempranoFin,sab_alm_tarde_inicio:c.sabAlmTardeInicio,sab_alm_tarde_fin:c.sabAlmTardeFin,sab_alm_especial_inicio:c.sabAlmEspecialInicio,sab_alm_especial_fin:c.sabAlmEspecialFin});
         }
         // Registros vacaciones
         const {data:rd}=await sb.from("registros").select("*").order("id");
@@ -531,7 +538,7 @@ function App(){
     setHorariosConfig(horarioCfgForm);sv("ce_horarios_cfg",horarioCfgForm);
     if(sbOnline){
       const c=horarioCfgForm;
-      await sb.from("horarios_config").update({semana_ancla:c.semanaAncla,grupo_temprano_ancla:c.grupoTempranoAncla,lv_temprano_entrada:c.lvTempranoEntrada,lv_temprano_salida:c.lvTempranoSalida,lv_tarde_entrada:c.lvTardeEntrada,lv_tarde_salida:c.lvTardeSalida,sab_temprano_entrada:c.sabTempranoEntrada,sab_temprano_salida:c.sabTempranoSalida,sab_tarde_entrada:c.sabTardeEntrada,sab_tarde_salida:c.sabTardeSalida}).eq("id",1);
+      await sb.from("horarios_config").update({semana_ancla:c.semanaAncla,grupo_temprano_ancla:c.grupoTempranoAncla,lv_temprano_entrada:c.lvTempranoEntrada,lv_temprano_salida:c.lvTempranoSalida,lv_tarde_entrada:c.lvTardeEntrada,lv_tarde_salida:c.lvTardeSalida,sab_temprano_entrada:c.sabTempranoEntrada,sab_temprano_salida:c.sabTempranoSalida,sab_tarde_entrada:c.sabTardeEntrada,sab_tarde_salida:c.sabTardeSalida,sab_alm_temprano_inicio:c.sabAlmTempranoInicio,sab_alm_temprano_fin:c.sabAlmTempranoFin,sab_alm_tarde_inicio:c.sabAlmTardeInicio,sab_alm_tarde_fin:c.sabAlmTardeFin,sab_alm_especial_inicio:c.sabAlmEspecialInicio,sab_alm_especial_fin:c.sabAlmEspecialFin}).eq("id",1);
     }
     setShowHorarioCfgForm(false);
   }
@@ -1168,11 +1175,13 @@ function App(){
                     <div style={{fontSize:10,color:C.naranja,fontWeight:700,textTransform:"uppercase"}}>{GRUPO_LABEL[grupoTemprano]} — entra temprano</div>
                     <div style={{fontSize:13,color:C.texto,marginTop:4}}>L-V: {horariosConfig.lvTempranoEntrada} a {horariosConfig.lvTempranoSalida}</div>
                     <div style={{fontSize:13,color:C.texto}}>Sáb: {horariosConfig.sabTempranoEntrada} a {horariosConfig.sabTempranoSalida}</div>
+                    <div style={{fontSize:11,color:C.textoS,marginTop:2}}>🍽 Almuerzo sáb: {horariosConfig.sabAlmTempranoInicio}–{horariosConfig.sabAlmTempranoFin}</div>
                   </div>
                   <div style={{background:C.azul+"15",border:`1.5px solid ${C.azul}40`,borderRadius:10,padding:"10px 12px"}}>
                     <div style={{fontSize:10,color:C.azulL,fontWeight:700,textTransform:"uppercase"}}>{GRUPO_LABEL[grupoTarde]} — entra tarde</div>
                     <div style={{fontSize:13,color:C.texto,marginTop:4}}>L-V: {horariosConfig.lvTardeEntrada} a {horariosConfig.lvTardeSalida}</div>
                     <div style={{fontSize:13,color:C.texto}}>Sáb: {horariosConfig.sabTardeEntrada} a {horariosConfig.sabTardeSalida}</div>
+                    <div style={{fontSize:11,color:C.textoS,marginTop:2}}>🍽 Almuerzo sáb: {horariosConfig.sabAlmTardeInicio}–{horariosConfig.sabAlmTardeFin}</div>
                   </div>
                 </div>
                 <div style={{fontSize:11,color:C.textoS,marginTop:10}}>La próxima semana rotan automáticamente. El café (15+15 min) no se resta ni se suma a las horas.</div>
@@ -1873,6 +1882,8 @@ function App(){
             <Field label="Salida L-V"><input type="time" value={horarioCfgForm.lvTempranoSalida} onChange={e=>setHorarioCfgForm(p=>({...p,lvTempranoSalida:e.target.value}))} style={inp}/></Field>
             <Field label="Entrada Sábado"><input type="time" value={horarioCfgForm.sabTempranoEntrada} onChange={e=>setHorarioCfgForm(p=>({...p,sabTempranoEntrada:e.target.value}))} style={inp}/></Field>
             <Field label="Salida Sábado"><input type="time" value={horarioCfgForm.sabTempranoSalida} onChange={e=>setHorarioCfgForm(p=>({...p,sabTempranoSalida:e.target.value}))} style={inp}/></Field>
+            <Field label="Almuerzo sábado - salida"><input type="time" value={horarioCfgForm.sabAlmTempranoInicio} onChange={e=>setHorarioCfgForm(p=>({...p,sabAlmTempranoInicio:e.target.value}))} style={inp}/></Field>
+            <Field label="Almuerzo sábado - entrada"><input type="time" value={horarioCfgForm.sabAlmTempranoFin} onChange={e=>setHorarioCfgForm(p=>({...p,sabAlmTempranoFin:e.target.value}))} style={inp}/></Field>
           </div>
 
           <div style={{fontSize:10,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,margin:"16px 0 8px"}}>🌙 Horario "tarde"</div>
@@ -1881,6 +1892,14 @@ function App(){
             <Field label="Salida L-V"><input type="time" value={horarioCfgForm.lvTardeSalida} onChange={e=>setHorarioCfgForm(p=>({...p,lvTardeSalida:e.target.value}))} style={inp}/></Field>
             <Field label="Entrada Sábado"><input type="time" value={horarioCfgForm.sabTardeEntrada} onChange={e=>setHorarioCfgForm(p=>({...p,sabTardeEntrada:e.target.value}))} style={inp}/></Field>
             <Field label="Salida Sábado"><input type="time" value={horarioCfgForm.sabTardeSalida} onChange={e=>setHorarioCfgForm(p=>({...p,sabTardeSalida:e.target.value}))} style={inp}/></Field>
+            <Field label="Almuerzo sábado - salida"><input type="time" value={horarioCfgForm.sabAlmTardeInicio} onChange={e=>setHorarioCfgForm(p=>({...p,sabAlmTardeInicio:e.target.value}))} style={inp}/></Field>
+            <Field label="Almuerzo sábado - entrada"><input type="time" value={horarioCfgForm.sabAlmTardeFin} onChange={e=>setHorarioCfgForm(p=>({...p,sabAlmTardeFin:e.target.value}))} style={inp}/></Field>
+          </div>
+
+          <div style={{fontSize:10,color:C.morado,fontWeight:700,textTransform:"uppercase",letterSpacing:1,margin:"16px 0 8px"}}>🔧 Almuerzo sábado — horario especial</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Field label="Almuerzo sábado - salida"><input type="time" value={horarioCfgForm.sabAlmEspecialInicio} onChange={e=>setHorarioCfgForm(p=>({...p,sabAlmEspecialInicio:e.target.value}))} style={inp}/></Field>
+            <Field label="Almuerzo sábado - entrada"><input type="time" value={horarioCfgForm.sabAlmEspecialFin} onChange={e=>setHorarioCfgForm(p=>({...p,sabAlmEspecialFin:e.target.value}))} style={inp}/></Field>
           </div>
 
           <div style={{display:"flex",gap:10,marginTop:16}}><button onClick={guardarHorariosConfig} style={btnP}>Guardar configuración</button><button onClick={()=>setShowHorarioCfgForm(false)} style={btnS}>Cancelar</button></div>
