@@ -63,14 +63,16 @@ function diffCampos(oldD,newD){
 
 const SB_URL = "https://nmxcvxmieeyhecuscacm.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5teGN2eG1pZWV5aGVjdXNjYWNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mzk2NzgsImV4cCI6MjA5NzMxNTY3OH0.I5jTt8CiONxmnZphP0CFZ1tcfUjiC-rwU94vInw5kw0";
-const sb = window.supabase.createClient(SB_URL, SB_KEY);
+const sb = window.supabase.createClient(SB_URL, SB_KEY, {
+  auth: { storageKey: "sb-control-empresarial-auth" } // llave propia: evita que la sesión se cruce con la otra app del mismo proyecto
+});
 
-// Cuentas de acceso (PIN de login). Deben existir en Supabase
+// Cuentas de acceso (usuario + PIN de login). Deben existir en Supabase
 // Authentication > Users con estos mismos correos y, como contraseña,
 // el PIN de cada persona (mínimo 6 caracteres).
 const CUENTAS_PIN = [
-  "admin1@controlempresarial.local",
-  "admin2@controlempresarial.local",
+  {email:"admin1@controlempresarial.local", nombre:"Sebastián"},
+  {email:"admin2@controlempresarial.local", nombre:"Allan"},
 ];
 
 function fmtDate(d){if(!d)return"—";const[y,m,day]=d.split("-");return`${day}/${m}/${y}`;}
@@ -2119,6 +2121,7 @@ function App(){
 }
 
 function LoginPin(){
+  const [usuario,setUsuario]=useState(CUENTAS_PIN[0].email);
   const [pin,setPin]=useState("");
   const [cargando,setCargando]=useState(false);
   const [error,setError]=useState("");
@@ -2127,20 +2130,27 @@ function LoginPin(){
     e.preventDefault();
     if(!pin||pin.length<6){setError("El PIN debe tener al menos 6 caracteres");return;}
     setCargando(true);setError("");
-    let ok=false;
-    for(const email of CUENTAS_PIN){
-      const {error:err}=await sb.auth.signInWithPassword({email,password:pin});
-      if(!err){ok=true;break;}
-    }
+    const {error:err}=await sb.auth.signInWithPassword({email:usuario,password:pin});
     setCargando(false);
-    if(!ok)setError("PIN incorrecto");
+    if(err)setError("PIN incorrecto para este usuario");
   }
 
   return(
     <div style={{minHeight:"100vh",background:C.negro,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <form onSubmit={entrar} style={{width:"100%",maxWidth:320,background:C.g1,borderRadius:14,padding:28,border:`1px solid ${C.g3}`}}>
         <div style={{fontSize:20,fontWeight:800,color:C.blanco,marginBottom:4,textAlign:"center"}}>Control Empresarial</div>
-        <div style={{fontSize:12,color:C.textoM,marginBottom:22,textAlign:"center"}}>Ingresá tu PIN para continuar</div>
+        <div style={{fontSize:12,color:C.textoM,marginBottom:22,textAlign:"center"}}>Elegí tu usuario e ingresá tu PIN</div>
+
+        <div style={{fontSize:11,color:C.textoM,fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Usuario</div>
+        <select
+          value={usuario}
+          onChange={e=>{setUsuario(e.target.value);setError("");}}
+          style={{width:"100%",padding:"11px 14px",borderRadius:10,border:`1.5px solid ${C.g3}`,fontSize:14,color:C.texto,background:C.g2,boxSizing:"border-box",marginBottom:14}}
+        >
+          {CUENTAS_PIN.map(c=><option key={c.email} value={c.email}>{c.nombre}</option>)}
+        </select>
+
+        <div style={{fontSize:11,color:C.textoM,fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>PIN</div>
         <input
           type="password"
           inputMode="numeric"
