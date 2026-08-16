@@ -905,6 +905,17 @@ function App(){
     const {data}=await sb.from("asistencia_feriados").select("*").order("fecha",{ascending:false});
     if(data)setInformeFeriadoTodos(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado})));
   }
+  // Datos agrupados por fecha (para el cuadro/tabla visual del informe)
+  function datosInformeFeriadoAgrupados(){
+    const conRegistro=informeFeriadoTodos.filter(a=>a.entrada||a.salida);
+    const porFecha={};
+    conRegistro.forEach(a=>{(porFecha[a.fecha]=porFecha[a.fecha]||[]).push(a);});
+    return Object.keys(porFecha).sort().reverse().map(fecha=>({
+      fecha,
+      nombre:porFecha[fecha][0].feriadoNombre||"(sin nombre)",
+      registros:porFecha[fecha].map(a=>({...a,colabNombre:colabs.find(x=>x.id===a.colabId)?.nombre||"—",horas:horasFeriado(a)}))
+    }));
+  }
   function generarInformeFeriadoTexto(){
     const conRegistro=informeFeriadoTodos.filter(a=>a.entrada||a.salida);
     let cuerpo=`Informe general de asistencia en feriados\n\n`;
@@ -1455,7 +1466,7 @@ function App(){
               </div>
 
               <div style={{background:C.g2,borderRadius:10,padding:12,marginBottom:14,border:`1px dashed ${C.g3}`}}>
-                <div style={{fontSize:11,color:C.textoM,fontWeight:700,marginBottom:8}}>⚡ Registro rápido — marcá quiénes trabajaron, poné la hora una vez y aplicá a todos</div>
+                <div style={{fontSize:11,color:C.textoM,fontWeight:700,marginBottom:8}}>⚡ Registro rápido</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                   <div>
                     <div style={{fontSize:10,color:C.textoS,marginBottom:3}}>Entrada</div>
@@ -1476,9 +1487,9 @@ function App(){
                 <button onClick={aplicarRegistroRapidoFeriado} style={{...btnP,width:"100%",padding:"9px"}}>Aplicar a los {Object.values(seleccionRapidaFeriado).filter(Boolean).length} seleccionados</button>
               </div>
 
-              <div style={{fontSize:11,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Asistencia del día — marcá con el check quién trabajó para el registro rápido</div>
+              <div style={{fontSize:11,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Asistencia del día</div>
               {colabsPorSeccion.map(sec=>(
-                <div key={sec.key} style={{marginBottom:16}}>
+                <div key={sec.key} style={{marginBottom:12}}>
                   <div style={{fontSize:11,color:C.textoM,fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:8,paddingLeft:2}}>{sec.label} <span style={{color:C.textoS,fontWeight:400}}>({sec.colabs.length})</span></div>
                   {sec.colabs.map(c=>{
                     const reg=asistDeColab(c.id);
@@ -1492,7 +1503,7 @@ function App(){
                           <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
                         </div>
                         {!reg&&(
-                          <button onClick={()=>agregarAsistFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Agregar registro</button>
+                          <span style={{fontSize:11,color:C.textoS,fontStyle:"italic"}}>Sin registrar</span>
                         )}
                         {reg&&(
                           <>
@@ -2163,10 +2174,41 @@ function App(){
       {showInformeFeriado&&(()=>{
         const {asunto,cuerpo}=generarInformeFeriadoTexto();
         const textoCompleto=`Asunto: ${asunto}\n\n${cuerpo}`;
+        const grupos=datosInformeFeriadoAgrupados();
         return(
           <Modal title="Informe general (todos los feriados)" onClose={()=>setShowInformeFeriado(false)}>
-            <Field label="Vista previa — copiá y pegá donde quieras enviarlo">
-              <textarea readOnly value={textoCompleto} style={{...inp,minHeight:220,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
+            {grupos.length===0?(
+              <div style={{fontSize:12,color:C.textoS,padding:"14px 0"}}>Sin registros de asistencia en feriados todavía.</div>
+            ):grupos.map(g=>(
+              <div key={g.fecha} style={{marginBottom:16,border:`1px solid ${C.g2}`,borderRadius:10,overflow:"hidden"}}>
+                <div style={{background:C.g2,padding:"8px 12px",fontSize:12,fontWeight:800,color:C.blanco}}>{g.fecha} — {g.nombre}</div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead>
+                    <tr style={{background:C.g1}}>
+                      <th style={{textAlign:"left",padding:"7px 10px",color:C.textoS,fontWeight:700}}>Colaborador</th>
+                      <th style={{textAlign:"center",padding:"7px 6px",color:C.textoS,fontWeight:700}}>Entrada</th>
+                      <th style={{textAlign:"center",padding:"7px 6px",color:C.textoS,fontWeight:700}}>Salida</th>
+                      <th style={{textAlign:"center",padding:"7px 6px",color:C.textoS,fontWeight:700}}>Almuerzo</th>
+                      <th style={{textAlign:"center",padding:"7px 10px",color:C.textoS,fontWeight:700}}>Horas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.registros.map(r=>(
+                      <tr key={r.id} style={{borderTop:`1px solid ${C.g2}`}}>
+                        <td style={{padding:"7px 10px",color:C.texto}}>{r.colabNombre}</td>
+                        <td style={{textAlign:"center",padding:"7px 6px",color:C.textoM}}>{r.entrada||"—"}</td>
+                        <td style={{textAlign:"center",padding:"7px 6px",color:C.textoM}}>{r.salida||"—"}</td>
+                        <td style={{textAlign:"center",padding:"7px 6px",color:C.textoM}}>{r.almuerzoRestado?"-1h":"—"}</td>
+                        <td style={{textAlign:"center",padding:"7px 10px",fontWeight:700,color:r.horas!==null?C.verde:C.textoS}}>{r.horas!==null?r.horas+"h":"—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+
+            <Field label="Texto para copiar y pegar">
+              <textarea readOnly value={textoCompleto} style={{...inp,minHeight:160,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
             </Field>
             <button onClick={()=>copiarInformeFeriado(textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:16}}>
               {informeFeriadoCopiado?"✓ Copiado — ya lo podés pegar":"📋 Copiar informe completo"}
