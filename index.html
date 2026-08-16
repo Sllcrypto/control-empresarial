@@ -310,6 +310,7 @@ function App(){
   const [showInformeFeriado,setShowInformeFeriado]=useState(false);
   const [informeFeriadoPara,setInformeFeriadoPara]=useState("");
   const [informeFeriadoCopiado,setInformeFeriadoCopiado]=useState(false);
+  const [informeFeriadoCopiadoHTML,setInformeFeriadoCopiadoHTML]=useState(false);
 
   // UI permisos
   const [showPermisoForm,setShowPermisoForm]=useState(false);
@@ -952,6 +953,42 @@ function App(){
       document.body.appendChild(ta);ta.focus();ta.select();
       try{document.execCommand("copy");setInformeFeriadoCopiado(true);setTimeout(()=>setInformeFeriadoCopiado(false),2500);}catch{}
       document.body.removeChild(ta);
+    }
+  }
+  function generarInformeFeriadoHTML(grupos){
+    let html=`<div style="font-family:Arial,sans-serif;">`;
+    grupos.forEach(g=>{
+      html+=`<h3 style="margin:16px 0 6px;">${g.fecha} — ${g.nombre}</h3>`;
+      html+=`<table style="border-collapse:collapse;width:100%;font-size:13px;"><thead><tr style="background:#eee;">`;
+      html+=`<th style="border:1px solid #ccc;padding:6px 8px;text-align:left;">Colaborador</th>`;
+      html+=`<th style="border:1px solid #ccc;padding:6px 8px;">Entrada</th>`;
+      html+=`<th style="border:1px solid #ccc;padding:6px 8px;">Salida</th>`;
+      html+=`<th style="border:1px solid #ccc;padding:6px 8px;">Almuerzo</th>`;
+      html+=`<th style="border:1px solid #ccc;padding:6px 8px;">Horas</th></tr></thead><tbody>`;
+      g.registros.forEach(r=>{
+        html+=`<tr><td style="border:1px solid #ccc;padding:6px 8px;">${r.colabNombre}</td>`;
+        html+=`<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;">${r.entrada||"—"}</td>`;
+        html+=`<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;">${r.salida||"—"}</td>`;
+        html+=`<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;">${r.almuerzoRestado?"-1h":"—"}</td>`;
+        html+=`<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;font-weight:bold;">${r.horas!==null?r.horas+"h":"—"}</td></tr>`;
+      });
+      html+=`</tbody></table>`;
+    });
+    html+=`</div>`;
+    return html;
+  }
+  async function copiarInformeFeriadoConFormato(grupos,textoPlano){
+    const html=generarInformeFeriadoHTML(grupos);
+    try{
+      const item=new ClipboardItem({
+        "text/html":new Blob([html],{type:"text/html"}),
+        "text/plain":new Blob([textoPlano],{type:"text/plain"}),
+      });
+      await navigator.clipboard.write([item]);
+      setInformeFeriadoCopiadoHTML(true);setTimeout(()=>setInformeFeriadoCopiadoHTML(false),2500);
+    }catch{
+      // Si el navegador no soporta copiar HTML, cae al copiado de texto plano normal
+      copiarInformeFeriado(textoPlano);
     }
   }
 
@@ -2177,6 +2214,13 @@ function App(){
         const grupos=datosInformeFeriadoAgrupados();
         return(
           <Modal title="Informe general (todos los feriados)" onClose={()=>setShowInformeFeriado(false)}>
+            {grupos.length>0&&(
+              <button onClick={()=>copiarInformeFeriadoConFormato(grupos,textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:6}}>
+                {informeFeriadoCopiadoHTML?"✓ Copiado con formato — pegalo en el correo":"📋 Copiar tabla con formato (1 toque)"}
+              </button>
+            )}
+            <div style={{fontSize:11,color:C.textoS,marginBottom:16,textAlign:"center"}}>Funciona igual en compu que en celular — no hace falta seleccionar nada, solo pegar (Ctrl+V o mantener presionado → Pegar) directo en el correo.</div>
+
             {grupos.length===0?(
               <div style={{fontSize:12,color:C.textoS,padding:"14px 0"}}>Sin registros de asistencia en feriados todavía.</div>
             ):grupos.map(g=>(
@@ -2207,11 +2251,11 @@ function App(){
               </div>
             ))}
 
-            <Field label="Texto para copiar y pegar">
+            <Field label="Alternativa: solo texto plano (sin tabla)">
               <textarea readOnly value={textoCompleto} style={{...inp,minHeight:160,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
             </Field>
-            <button onClick={()=>copiarInformeFeriado(textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:16}}>
-              {informeFeriadoCopiado?"✓ Copiado — ya lo podés pegar":"📋 Copiar informe completo"}
+            <button onClick={()=>copiarInformeFeriado(textoCompleto)} style={{...btnS,width:"100%",padding:"10px",fontSize:13,marginBottom:16}}>
+              {informeFeriadoCopiado?"✓ Copiado":"📋 Copiar solo texto"}
             </button>
 
             <div style={{borderTop:`1px solid ${C.g3}`,paddingTop:14}}>
