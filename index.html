@@ -305,8 +305,11 @@ function App(){
   const [feriadosApiCache,setFeriadosApiCache]=useState({}); // {2026: [...], 2027: [...]}
   const [feriadoNombreManual,setFeriadoNombreManual]=useState("");
   const [asistFeriados,setAsistFeriados]=useState([]); // registros del día seleccionado
+  const [seleccionRapidaFeriado,setSeleccionRapidaFeriado]=useState({}); // {colabId:true}
+  const [horaRapidaFeriado,setHoraRapidaFeriado]=useState({entrada:"",salida:"",almuerzo:false});
   const [showInformeFeriado,setShowInformeFeriado]=useState(false);
   const [informeFeriadoPara,setInformeFeriadoPara]=useState("");
+  const [informeFeriadoCopiado,setInformeFeriadoCopiado]=useState(false);
 
   // UI permisos
   const [showPermisoForm,setShowPermisoForm]=useState(false);
@@ -871,6 +874,24 @@ function App(){
     if(sbOnline)await sb.from("asistencia_feriados").delete().eq("id",reg.id);
     setAsistFeriados(p=>p.filter(a=>a.id!==reg.id));
   }
+  function toggleSeleccionRapidaFeriado(colabId){setSeleccionRapidaFeriado(p=>({...p,[colabId]:!p[colabId]}));}
+  async function aplicarRegistroRapidoFeriado(){
+    const {entrada,salida,almuerzo}=horaRapidaFeriado;
+    const ids=Object.keys(seleccionRapidaFeriado).filter(id=>seleccionRapidaFeriado[id]).map(Number);
+    if(ids.length===0||(!entrada&&!salida))return;
+    for(const colabId of ids){
+      const existente=asistDeColab(colabId);
+      const payload={colab_id:colabId,fecha:feriadoFecha,feriado_nombre:nombreFeriadoActual||null,entrada:entrada||null,salida:salida||null,almuerzo_restado:almuerzo};
+      if(existente){
+        if(sbOnline)await sb.from("asistencia_feriados").update({entrada:payload.entrada,salida:payload.salida,almuerzo_restado:almuerzo}).eq("id",existente.id);
+        setAsistFeriados(p=>p.map(a=>a.id===existente.id?{...a,entrada:payload.entrada,salida:payload.salida,almuerzoRestado:almuerzo}:a));
+      } else if(sbOnline){
+        const {data}=await sb.from("asistencia_feriados").insert(payload).select().single();
+        if(data)setAsistFeriados(p=>[...p,{id:data.id,colabId,fecha:feriadoFecha,feriadoNombre:nombreFeriadoActual,entrada:payload.entrada,salida:payload.salida,almuerzoRestado:almuerzo}]);
+      }
+    }
+    setSeleccionRapidaFeriado({});
+  }
   function horasFeriado(reg){
     if(!reg||!reg.entrada||!reg.salida)return null;
     const min=minutosEntre(reg.entrada,reg.salida)-(reg.almuerzoRestado?60:0);
@@ -907,6 +928,20 @@ function App(){
       cuerpo+="\n";
     });
     return {asunto:`Informe general de asistencia en feriados (${fechas.length} feriado${fechas.length===1?"":"s"})`,cuerpo};
+  }
+
+  async function copiarInformeFeriado(texto){
+    try{
+      await navigator.clipboard.writeText(texto);
+      setInformeFeriadoCopiado(true);setTimeout(()=>setInformeFeriadoCopiado(false),2500);
+    }catch{
+      // Respaldo para navegadores/webviews donde falla la API de portapapeles
+      const ta=document.createElement("textarea");
+      ta.value=texto;ta.style.position="fixed";ta.style.opacity="0";
+      document.body.appendChild(ta);ta.focus();ta.select();
+      try{document.execCommand("copy");setInformeFeriadoCopiado(true);setTimeout(()=>setInformeFeriadoCopiado(false),2500);}catch{}
+      document.body.removeChild(ta);
+    }
   }
 
   // Filtros
@@ -1385,6 +1420,16 @@ function App(){
         {/* ══ FERIADOS ══ */}
         {view==="feriados"&&(()=>{
           const colabsActivos=colabs; // lista completa, igual que en café
+          const SECCIONES_FERIADO=[
+            {key:"grupo1",label:`${GRUPO_LABEL.grupo1} (rotativo)`},
+            {key:"grupo2",label:`${GRUPO_LABEL.grupo2} (rotativo)`},
+            {key:"especial",label:"Horario fijo especial"},
+            {key:"ninguno",label:"Sin grupo asignado"},
+          ];
+          const colabsPorSeccion=SECCIONES_FERIADO.map(sec=>({
+            ...sec,
+            colabs:colabsActivos.filter(c=>(c.grupoHorario||"ninguno")===sec.key)
+          })).filter(sec=>sec.colabs.length>0);
           return(
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
@@ -1409,38 +1454,71 @@ function App(){
                 )}
               </div>
 
-              <div style={{fontSize:11,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Asistencia del día</div>
-              {colabsActivos.map(c=>{
-                const reg=asistDeColab(c.id);
-                const horas=horasFeriado(reg);
-                return(
-                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:C.g1,borderRadius:10,marginBottom:6,border:`1px solid ${C.g2}`,flexWrap:"wrap"}}>
-                    <div style={{width:8,height:8,borderRadius:"50%",background:AREA_COLOR[c.area]||C.textoS,flexShrink:0}}/>
-                    <div style={{flex:1,minWidth:120}}>
-                      <div style={{fontWeight:600,fontSize:13}}>{c.nombre}</div>
-                      <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
-                    </div>
-                    {!reg&&(
-                      <button onClick={()=>agregarAsistFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Agregar registro</button>
-                    )}
-                    {reg&&(
-                      <>
-                        <div style={{display:"flex",alignItems:"center",gap:5}}>
-                          <span style={{fontSize:10,color:C.textoS}}>Entrada</span>
-                          <input type="time" value={reg.entrada||""} onChange={e=>actualizarHoraFeriado(c.id,"entrada",e.target.value)} style={{...inp,padding:"6px 8px",width:110}}/>
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",gap:5}}>
-                          <span style={{fontSize:10,color:C.textoS}}>Salida</span>
-                          <input type="time" value={reg.salida||""} onChange={e=>actualizarHoraFeriado(c.id,"salida",e.target.value)} style={{...inp,padding:"6px 8px",width:110}}/>
-                        </div>
-                        <button onClick={()=>toggleAlmuerzoFeriado(c.id)} style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${reg.almuerzoRestado?C.azulL:C.g3}`,background:reg.almuerzoRestado?C.azulL+"25":"transparent",color:reg.almuerzoRestado?C.azulL:C.textoM,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>🍽 {reg.almuerzoRestado?"Almuerzo restado (-1h)":"Restar almuerzo"}</button>
-                        {horas!==null&&<span style={{background:C.verde+"20",color:C.verde,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:800}}>{horas}h</span>}
-                        <button onClick={()=>borrarAsistFeriado(c.id)} title="Borrar" style={{padding:"7px 9px",borderRadius:8,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
-                      </>
-                    )}
+              <div style={{background:C.g2,borderRadius:10,padding:12,marginBottom:14,border:`1px dashed ${C.g3}`}}>
+                <div style={{fontSize:11,color:C.textoM,fontWeight:700,marginBottom:8}}>⚡ Registro rápido — marcá quiénes trabajaron, poné la hora una vez y aplicá a todos</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:10,color:C.textoS,marginBottom:3}}>Entrada</div>
+                    <input type="time" value={horaRapidaFeriado.entrada} onChange={e=>setHoraRapidaFeriado(p=>({...p,entrada:e.target.value}))} style={inp}/>
                   </div>
-                );
-              })}
+                  <div>
+                    <div style={{fontSize:10,color:C.textoS,marginBottom:3}}>Salida</div>
+                    <input type="time" value={horaRapidaFeriado.salida} onChange={e=>setHoraRapidaFeriado(p=>({...p,salida:e.target.value}))} style={inp}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                  <button onClick={()=>setHoraRapidaFeriado(p=>({...p,almuerzo:!p.almuerzo}))} style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${horaRapidaFeriado.almuerzo?C.azulL:C.g3}`,background:horaRapidaFeriado.almuerzo?C.azulL+"25":"transparent",color:horaRapidaFeriado.almuerzo?C.azulL:C.textoM,fontSize:11,fontWeight:700,cursor:"pointer"}}>🍽 {horaRapidaFeriado.almuerzo?"Restando almuerzo (-1h)":"Restar almuerzo a todos"}</button>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>{const t={};colabsActivos.forEach(c=>t[c.id]=true);setSeleccionRapidaFeriado(t);}} style={{fontSize:11,color:C.azulL,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Seleccionar todos</button>
+                    <button onClick={()=>setSeleccionRapidaFeriado({})} style={{fontSize:11,color:C.textoS,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Quitar selección</button>
+                  </div>
+                </div>
+                <button onClick={aplicarRegistroRapidoFeriado} style={{...btnP,width:"100%",padding:"9px"}}>Aplicar a los {Object.values(seleccionRapidaFeriado).filter(Boolean).length} seleccionados</button>
+              </div>
+
+              <div style={{fontSize:11,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Asistencia del día — marcá con el check quién trabajó para el registro rápido</div>
+              {colabsPorSeccion.map(sec=>(
+                <div key={sec.key} style={{marginBottom:16}}>
+                  <div style={{fontSize:11,color:C.textoM,fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:8,paddingLeft:2}}>{sec.label} <span style={{color:C.textoS,fontWeight:400}}>({sec.colabs.length})</span></div>
+                  {sec.colabs.map(c=>{
+                    const reg=asistDeColab(c.id);
+                    const horas=horasFeriado(reg);
+                    return(
+                      <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:C.g1,borderRadius:10,marginBottom:6,border:`1px solid ${C.g2}`,flexWrap:"wrap"}}>
+                        <input type="checkbox" checked={!!seleccionRapidaFeriado[c.id]} onChange={()=>toggleSeleccionRapidaFeriado(c.id)} style={{width:16,height:16,cursor:"pointer",flexShrink:0}}/>
+                        <div style={{width:8,height:8,borderRadius:"50%",background:AREA_COLOR[c.area]||C.textoS,flexShrink:0}}/>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontWeight:600,fontSize:13}}>{c.nombre}</div>
+                          <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
+                        </div>
+                        {!reg&&(
+                          <button onClick={()=>agregarAsistFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Agregar registro</button>
+                        )}
+                        {reg&&(
+                          <>
+                            <div style={{display:"flex",alignItems:"center",gap:5}}>
+                              <span style={{fontSize:10,color:C.textoS}}>Entrada</span>
+                              <input type="time" value={reg.entrada||""} onChange={e=>actualizarHoraFeriado(c.id,"entrada",e.target.value)} style={{...inp,padding:"6px 8px",width:110}}/>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:5}}>
+                              <span style={{fontSize:10,color:C.textoS}}>Salida</span>
+                              <input type="time" value={reg.salida||""} onChange={e=>actualizarHoraFeriado(c.id,"salida",e.target.value)} style={{...inp,padding:"6px 8px",width:110}}/>
+                            </div>
+                            <button onClick={()=>toggleAlmuerzoFeriado(c.id)} style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${reg.almuerzoRestado?C.azulL:C.g3}`,background:reg.almuerzoRestado?C.azulL+"25":"transparent",color:reg.almuerzoRestado?C.azulL:C.textoM,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>🍽 {reg.almuerzoRestado?"Almuerzo restado (-1h)":"Restar almuerzo"}</button>
+                            {horas!==null&&<span style={{background:C.verde+"20",color:C.verde,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:800}}>{horas}h</span>}
+                            <button onClick={()=>borrarAsistFeriado(c.id)} title="Borrar" style={{padding:"7px 9px",borderRadius:8,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+
+              <div style={{marginTop:14,padding:"12px 16px",background:C.g1,borderRadius:10,border:`1px solid ${C.g2}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:12,color:C.textoM,fontWeight:700}}>Total registrados este feriado</span>
+                <span style={{fontSize:16,fontWeight:800,color:C.azulL}}>{asistFeriados.filter(a=>a.entrada||a.salida).length} de {colabsActivos.length} colaboradores</span>
+              </div>
             </div>
           );
         })()}
@@ -2084,20 +2162,27 @@ function App(){
 
       {showInformeFeriado&&(()=>{
         const {asunto,cuerpo}=generarInformeFeriadoTexto();
+        const textoCompleto=`Asunto: ${asunto}\n\n${cuerpo}`;
         return(
-          <Modal title="Enviar informe general (todos los feriados)" onClose={()=>setShowInformeFeriado(false)}>
-            <Field label="Para (correo del destinatario)">
-              <input type="email" value={informeFeriadoPara} onChange={e=>setInformeFeriadoPara(e.target.value)} placeholder="ejemplo@correo.com" style={inp}/>
+          <Modal title="Informe general (todos los feriados)" onClose={()=>setShowInformeFeriado(false)}>
+            <Field label="Vista previa — copiá y pegá donde quieras enviarlo">
+              <textarea readOnly value={textoCompleto} style={{...inp,minHeight:220,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
             </Field>
-            <Field label="Vista previa">
-              <textarea readOnly value={`Asunto: ${asunto}\n\n${cuerpo}`} style={{...inp,minHeight:180,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
-            </Field>
-            <div style={{fontSize:11,color:C.textoS,margin:"4px 0 12px"}}>Elegí con qué correo enviarlo — se abre ya redactado, listo para darle "Enviar".</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <button onClick={()=>abrirEmailCompose("gmail",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Gmail</button>
-              <button onClick={()=>abrirEmailCompose("outlook",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Outlook</button>
-              <button onClick={()=>abrirEmailCompose("yahoo",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Yahoo</button>
-              <button onClick={()=>abrirEmailCompose("otro",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Otro / predeterminado</button>
+            <button onClick={()=>copiarInformeFeriado(textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:16}}>
+              {informeFeriadoCopiado?"✓ Copiado — ya lo podés pegar":"📋 Copiar informe completo"}
+            </button>
+
+            <div style={{borderTop:`1px solid ${C.g3}`,paddingTop:14}}>
+              <div style={{fontSize:11,color:C.textoS,marginBottom:8}}>Opcional: intentar abrir directo en tu correo (puede que el navegador lo bloquee — si no abre bien, usá el botón de copiar de arriba).</div>
+              <Field label="Para (correo del destinatario)">
+                <input type="email" value={informeFeriadoPara} onChange={e=>setInformeFeriadoPara(e.target.value)} placeholder="ejemplo@correo.com" style={inp}/>
+              </Field>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <button onClick={()=>abrirEmailCompose("gmail",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Gmail</button>
+                <button onClick={()=>abrirEmailCompose("outlook",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Outlook</button>
+                <button onClick={()=>abrirEmailCompose("yahoo",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Yahoo</button>
+                <button onClick={()=>abrirEmailCompose("otro",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Otro / predeterminado</button>
+              </div>
             </div>
           </Modal>
         );
