@@ -111,6 +111,29 @@ function abrirWhatsApp(telefono,mensaje){
   window.open(url,"_blank","noopener,noreferrer");
 }
 
+// ══ CORREO (multi-proveedor) ══
+function abrirEmailCompose(proveedor,para,asunto,cuerpo){
+  const to=encodeURIComponent(para||"");
+  const su=encodeURIComponent(asunto||"");
+  const bo=encodeURIComponent(cuerpo||"");
+  const urls={
+    gmail:`https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${bo}`,
+    outlook:`https://outlook.live.com/mail/0/deeplink/compose?to=${to}&subject=${su}&body=${bo}`,
+    yahoo:`https://compose.mail.yahoo.com/?to=${to}&subject=${su}&body=${bo}`,
+    otro:`mailto:${to}?subject=${su}&body=${bo}`,
+  };
+  window.open(urls[proveedor]||urls.otro,"_blank","noopener,noreferrer");
+}
+
+// ══ FERIADOS (Costa Rica, vía API pública Nager.Date) ══
+async function fetchFeriadosCR(anio){
+  try{
+    const res=await fetch(`https://date.nager.at/api/v3/PublicHolidays/${anio}/CR`);
+    if(!res.ok)return [];
+    return await res.json(); // [{date:"2026-08-15", localName:"Día de la Madre", name:"Mother's Day", ...}]
+  }catch{return [];}
+}
+
 // ══ HORARIOS ══
 const GRUPO_LABEL = {grupo1:"Grupo 1",grupo2:"Grupo 2"};
 const HORARIOS_CFG_INIT = {
@@ -277,6 +300,14 @@ function App(){
   const [horarioCfgForm,setHorarioCfgForm]=useState(horariosConfig);
   const [horariosTab,setHorariosTab]=useState("grupos");
 
+  // Feriados / asistencia en feriados
+  const [feriadoFecha,setFeriadoFecha]=useState(()=>new Date().toISOString().split("T")[0]);
+  const [feriadosApiCache,setFeriadosApiCache]=useState({}); // {2026: [...], 2027: [...]}
+  const [feriadoNombreManual,setFeriadoNombreManual]=useState("");
+  const [asistFeriados,setAsistFeriados]=useState([]); // registros del día seleccionado
+  const [showInformeFeriado,setShowInformeFeriado]=useState(false);
+  const [informeFeriadoPara,setInformeFeriadoPara]=useState("");
+
   // UI permisos
   const [showPermisoForm,setShowPermisoForm]=useState(false);
   const [incapacidades,setIncapacidades]=useState(()=>ls("ce_incap",[]));
@@ -329,6 +360,31 @@ function App(){
       }).subscribe();
     return()=>sb.removeChannel(ch);
   },[sbOnline]);
+
+  // Cargar feriados de Costa Rica (API) para el año de la fecha seleccionada
+  useEffect(()=>{
+    const anio=Number(feriadoFecha.slice(0,4));
+    if(feriadosApiCache[anio])return;
+    fetchFeriadosCR(anio).then(lista=>{
+      setFeriadosApiCache(prev=>({...prev,[anio]:lista}));
+    });
+  },[feriadoFecha]);
+
+  // Cargar asistencia de feriados del día seleccionado
+  useEffect(()=>{
+    if(!sbOnline){setAsistFeriados([]);return;}
+    let activo=true;
+    sb.from("asistencia_feriados").select("*").eq("fecha",feriadoFecha).then(({data})=>{
+      if(!activo)return;
+      if(data)setAsistFeriados(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado})));
+    });
+    const ch=sb.channel("asist_feriados_"+feriadoFecha)
+      .on("postgres_changes",{event:"*",schema:"public",table:"asistencia_feriados",filter:`fecha=eq.${feriadoFecha}`},async()=>{
+        const {data}=await sb.from("asistencia_feriados").select("*").eq("fecha",feriadoFecha);
+        if(data)setAsistFeriados(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado})));
+      }).subscribe();
+    return()=>{activo=false;sb.removeChannel(ch);};
+  },[feriadoFecha,sbOnline]);
 
   // Realtime registros vacaciones
   useEffect(()=>{
@@ -783,6 +839,56 @@ function App(){
     abrirWhatsApp(colab?.telefono,msg);
   }
 
+  // Feriados: nombre detectado por API para la fecha seleccionada (o manual si no hay match)
+  const anioFeriado=Number(feriadoFecha.slice(0,4));
+  const listaFeriadosAnio=feriadosApiCache[anioFeriado]||[];
+  const feriadoDetectado=listaFeriadosAnio.find(f=>f.date===feriadoFecha);
+  const nombreFeriadoActual=feriadoDetectado?feriadoDetectado.localName:feriadoNombreManual;
+
+  function horaActual(){return new Date().toTimeString().slice(0,5);}
+  function asistDeColab(colabId){return asistFeriados.find(a=>a.colabId===colabId);}
+  async function marcarEntradaFeriado(colabId){
+    if(asistDeColab(colabId))return;
+    const payload={colab_id:colabId,fecha:feriadoFecha,feriado_nombre:nombreFeriadoActual||null,entrada:horaActual(),salida:null,almuerzo_restado:false};
+    if(sbOnline){
+      const {data}=await sb.from("asistencia_feriados").insert(payload).select().single();
+      if(data)setAsistFeriados(p=>[...p,{id:data.id,colabId,fecha:feriadoFecha,feriadoNombre:nombreFeriadoActual,entrada:payload.entrada,salida:null,almuerzoRestado:false}]);
+    }
+  }
+  async function marcarSalidaFeriado(colabId){
+    const reg=asistDeColab(colabId);if(!reg)return;
+    if(sbOnline)await sb.from("asistencia_feriados").update({salida:horaActual()}).eq("id",reg.id);
+    setAsistFeriados(p=>p.map(a=>a.id===reg.id?{...a,salida:horaActual()}:a));
+  }
+  async function toggleAlmuerzoFeriado(colabId){
+    const reg=asistDeColab(colabId);if(!reg)return;
+    const nuevo=!reg.almuerzoRestado;
+    if(sbOnline)await sb.from("asistencia_feriados").update({almuerzo_restado:nuevo}).eq("id",reg.id);
+    setAsistFeriados(p=>p.map(a=>a.id===reg.id?{...a,almuerzoRestado:nuevo}:a));
+  }
+  async function borrarAsistFeriado(colabId){
+    const reg=asistDeColab(colabId);if(!reg)return;
+    if(sbOnline)await sb.from("asistencia_feriados").delete().eq("id",reg.id);
+    setAsistFeriados(p=>p.filter(a=>a.id!==reg.id));
+  }
+  function horasFeriado(reg){
+    if(!reg||!reg.entrada||!reg.salida)return null;
+    const min=minutosEntre(reg.entrada,reg.salida)-(reg.almuerzoRestado?60:0);
+    return +(Math.max(0,min)/60).toFixed(2);
+  }
+  function generarInformeFeriadoTexto(){
+    const nombre=nombreFeriadoActual||"(sin nombre)";
+    let cuerpo=`Informe de asistencia en feriado\nFecha: ${feriadoFecha}\nFeriado: ${nombre}\n\n`;
+    const conRegistro=asistFeriados.filter(a=>a.entrada);
+    if(conRegistro.length===0)cuerpo+="Sin registros de asistencia para este día.\n";
+    conRegistro.forEach(a=>{
+      const c=colabs.find(x=>x.id===a.colabId);
+      const h=horasFeriado(a);
+      cuerpo+=`• ${c?.nombre||"—"} — Entrada: ${a.entrada} · Salida: ${a.salida||"(sin marcar)"} · Almuerzo: ${a.almuerzoRestado?"sí (-1h)":"no"} · Horas: ${h!==null?h+"h":"—"}\n`;
+    });
+    return {asunto:`Informe de asistencia - ${nombre} - ${feriadoFecha}`,cuerpo};
+  }
+
   // Filtros
   const regsFiltrados=registros.filter(r=>{
     const c=getColab(r.colabId);
@@ -829,7 +935,7 @@ function App(){
           <button onClick={()=>sb.auth.signOut()} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${C.g3}`,background:"transparent",color:C.textoM,fontSize:11,cursor:"pointer",marginTop:2}}>Salir</button>
         </div>
         <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:10}}>
-          {[["dashboard","⚡ Inicio"],["cafe","☕ Café"],["registros","📋 Vacaciones"],["permisos","📝 Permisos"],["incapacidades","🏥 Incapac."],["calendario","📅 Calendario"],["colaboradores","👥 Colabs"],["horarios","🕐 Horarios"],["auditoria","🔍 Auditoría"]].map(([v,label])=>(
+          {[["dashboard","⚡ Inicio"],["cafe","☕ Café"],["registros","📋 Vacaciones"],["permisos","📝 Permisos"],["incapacidades","🏥 Incapac."],["calendario","📅 Calendario"],["colaboradores","👥 Colabs"],["horarios","🕐 Horarios"],["feriados","🎉 Feriados"],["auditoria","🔍 Auditoría"]].map(([v,label])=>(
             <button key={v} onClick={()=>setView(v)} style={{padding:"7px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",background:view===v?C.naranja:C.g2,color:view===v?C.blanco:C.textoM}}>{label}</button>
           ))}
         </div>
@@ -1252,6 +1358,69 @@ function App(){
                   }
                 </div>
               )}
+            </div>
+          );
+        })()}
+
+        {/* ══ FERIADOS ══ */}
+        {view==="feriados"&&(()=>{
+          const colabsActivos=colabs; // lista completa, igual que en café
+          return(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.blanco}}>🎉 <span style={{color:C.azulL}}>Feriados</span></div>
+                <button onClick={()=>{setInformeFeriadoPara("");setShowInformeFeriado(true);}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>📧 Enviar informe</button>
+              </div>
+
+              <div style={{background:C.g1,borderRadius:14,padding:16,marginBottom:16,border:`1px solid ${C.g2}`}}>
+                <Field label="Fecha">
+                  <input type="date" value={feriadoFecha} onChange={e=>{setFeriadoFecha(e.target.value);setFeriadoNombreManual("");}} style={inp}/>
+                </Field>
+                {feriadoDetectado?(
+                  <div style={{marginTop:10,background:C.naranja+"15",border:`1.5px solid ${C.naranja}40`,borderRadius:10,padding:"10px 12px"}}>
+                    <div style={{fontSize:10,color:C.naranja,fontWeight:700,textTransform:"uppercase"}}>✓ Feriado detectado automáticamente</div>
+                    <div style={{fontSize:15,color:C.texto,fontWeight:700,marginTop:2}}>{feriadoDetectado.localName}</div>
+                  </div>
+                ):(
+                  <div style={{marginTop:10}}>
+                    <div style={{fontSize:11,color:C.textoS,marginBottom:6}}>Esta fecha no aparece como feriado oficial de Costa Rica. Si igual necesitás registrar asistencia ese día (ej. un feriado de empresa), poné un nombre:</div>
+                    <input type="text" value={feriadoNombreManual} onChange={e=>setFeriadoNombreManual(e.target.value)} placeholder="Ej. Aniversario de la empresa" style={inp}/>
+                  </div>
+                )}
+              </div>
+
+              <div style={{fontSize:11,color:C.azulL,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Asistencia del día</div>
+              {colabsActivos.map(c=>{
+                const reg=asistDeColab(c.id);
+                const horas=horasFeriado(reg);
+                return(
+                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:C.g1,borderRadius:10,marginBottom:6,border:`1px solid ${C.g2}`,flexWrap:"wrap"}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:AREA_COLOR[c.area]||C.textoS,flexShrink:0}}/>
+                    <div style={{flex:1,minWidth:120}}>
+                      <div style={{fontWeight:600,fontSize:13}}>{c.nombre}</div>
+                      <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
+                    </div>
+                    {!reg&&(
+                      <button onClick={()=>marcarEntradaFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.verde,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>Marcar entrada</button>
+                    )}
+                    {reg&&!reg.salida&&(
+                      <>
+                        <span style={{fontSize:12,color:C.textoM}}>Entrada: <b>{reg.entrada}</b></span>
+                        <button onClick={()=>marcarSalidaFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.naranja,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>Marcar salida</button>
+                        <button onClick={()=>borrarAsistFeriado(c.id)} title="Cancelar" style={{padding:"7px 9px",borderRadius:8,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✕</button>
+                      </>
+                    )}
+                    {reg&&reg.salida&&(
+                      <>
+                        <span style={{fontSize:12,color:C.textoM}}>{reg.entrada}–{reg.salida}</span>
+                        <button onClick={()=>toggleAlmuerzoFeriado(c.id)} style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${reg.almuerzoRestado?C.azulL:C.g3}`,background:reg.almuerzoRestado?C.azulL+"25":"transparent",color:reg.almuerzoRestado?C.azulL:C.textoM,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>🍽 {reg.almuerzoRestado?"Almuerzo restado (-1h)":"Restar almuerzo"}</button>
+                        <span style={{background:C.verde+"20",color:C.verde,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:800}}>{horas}h</span>
+                        <button onClick={()=>borrarAsistFeriado(c.id)} title="Borrar" style={{padding:"7px 9px",borderRadius:8,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })()}
@@ -1892,6 +2061,27 @@ function App(){
           <div style={{display:"flex",gap:10,marginTop:8}}><button onClick={saveColab} style={btnP}>Guardar</button><button onClick={()=>{setShowColabForm(false);setColabEdit(null);}} style={btnS}>Cancelar</button></div>
         </Modal>
       )}
+
+      {showInformeFeriado&&(()=>{
+        const {asunto,cuerpo}=generarInformeFeriadoTexto();
+        return(
+          <Modal title="Enviar informe por correo" onClose={()=>setShowInformeFeriado(false)}>
+            <Field label="Para (correo del destinatario)">
+              <input type="email" value={informeFeriadoPara} onChange={e=>setInformeFeriadoPara(e.target.value)} placeholder="ejemplo@correo.com" style={inp}/>
+            </Field>
+            <Field label="Vista previa">
+              <textarea readOnly value={`Asunto: ${asunto}\n\n${cuerpo}`} style={{...inp,minHeight:180,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
+            </Field>
+            <div style={{fontSize:11,color:C.textoS,margin:"4px 0 12px"}}>Elegí con qué correo enviarlo — se abre ya redactado, listo para darle "Enviar".</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <button onClick={()=>abrirEmailCompose("gmail",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Gmail</button>
+              <button onClick={()=>abrirEmailCompose("outlook",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Outlook</button>
+              <button onClick={()=>abrirEmailCompose("yahoo",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Yahoo</button>
+              <button onClick={()=>abrirEmailCompose("otro",informeFeriadoPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Otro / predeterminado</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {showHorarioCfgForm&&(
         <Modal title="Configurar horarios rotativos" onClose={()=>setShowHorarioCfgForm(false)}>
