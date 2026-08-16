@@ -847,18 +847,18 @@ function App(){
 
   function horaActual(){return new Date().toTimeString().slice(0,5);}
   function asistDeColab(colabId){return asistFeriados.find(a=>a.colabId===colabId);}
-  async function marcarEntradaFeriado(colabId){
+  async function agregarAsistFeriado(colabId){
     if(asistDeColab(colabId))return;
-    const payload={colab_id:colabId,fecha:feriadoFecha,feriado_nombre:nombreFeriadoActual||null,entrada:horaActual(),salida:null,almuerzo_restado:false};
+    const payload={colab_id:colabId,fecha:feriadoFecha,feriado_nombre:nombreFeriadoActual||null,entrada:null,salida:null,almuerzo_restado:false};
     if(sbOnline){
       const {data}=await sb.from("asistencia_feriados").insert(payload).select().single();
-      if(data)setAsistFeriados(p=>[...p,{id:data.id,colabId,fecha:feriadoFecha,feriadoNombre:nombreFeriadoActual,entrada:payload.entrada,salida:null,almuerzoRestado:false}]);
+      if(data)setAsistFeriados(p=>[...p,{id:data.id,colabId,fecha:feriadoFecha,feriadoNombre:nombreFeriadoActual,entrada:null,salida:null,almuerzoRestado:false}]);
     }
   }
-  async function marcarSalidaFeriado(colabId){
+  async function actualizarHoraFeriado(colabId,campo,valor){
     const reg=asistDeColab(colabId);if(!reg)return;
-    if(sbOnline)await sb.from("asistencia_feriados").update({salida:horaActual()}).eq("id",reg.id);
-    setAsistFeriados(p=>p.map(a=>a.id===reg.id?{...a,salida:horaActual()}:a));
+    if(sbOnline)await sb.from("asistencia_feriados").update({[campo]:valor||null}).eq("id",reg.id);
+    setAsistFeriados(p=>p.map(a=>a.id===reg.id?{...a,[campo==="entrada"?"entrada":"salida"]:valor}:a));
   }
   async function toggleAlmuerzoFeriado(colabId){
     const reg=asistDeColab(colabId);if(!reg)return;
@@ -876,17 +876,37 @@ function App(){
     const min=minutosEntre(reg.entrada,reg.salida)-(reg.almuerzoRestado?60:0);
     return +(Math.max(0,min)/60).toFixed(2);
   }
+
+  // Informe GENERAL: junta TODOS los feriados con registros en un solo correo (no uno por fecha)
+  const [informeFeriadoTodos,setInformeFeriadoTodos]=useState([]);
+  async function cargarInformeFeriadoGeneral(){
+    if(!sbOnline)return;
+    const {data}=await sb.from("asistencia_feriados").select("*").order("fecha",{ascending:false});
+    if(data)setInformeFeriadoTodos(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado})));
+  }
   function generarInformeFeriadoTexto(){
-    const nombre=nombreFeriadoActual||"(sin nombre)";
-    let cuerpo=`Informe de asistencia en feriado\nFecha: ${feriadoFecha}\nFeriado: ${nombre}\n\n`;
-    const conRegistro=asistFeriados.filter(a=>a.entrada);
-    if(conRegistro.length===0)cuerpo+="Sin registros de asistencia para este día.\n";
-    conRegistro.forEach(a=>{
-      const c=colabs.find(x=>x.id===a.colabId);
-      const h=horasFeriado(a);
-      cuerpo+=`• ${c?.nombre||"—"} — Entrada: ${a.entrada} · Salida: ${a.salida||"(sin marcar)"} · Almuerzo: ${a.almuerzoRestado?"sí (-1h)":"no"} · Horas: ${h!==null?h+"h":"—"}\n`;
+    const conRegistro=informeFeriadoTodos.filter(a=>a.entrada||a.salida);
+    let cuerpo=`Informe general de asistencia en feriados\n\n`;
+    if(conRegistro.length===0){
+      cuerpo+="Sin registros de asistencia en feriados todavía.\n";
+      return {asunto:"Informe de asistencia en feriados",cuerpo};
+    }
+    // Agrupar por fecha
+    const porFecha={};
+    conRegistro.forEach(a=>{(porFecha[a.fecha]=porFecha[a.fecha]||[]).push(a);});
+    const fechas=Object.keys(porFecha).sort().reverse();
+    fechas.forEach(fecha=>{
+      const regs=porFecha[fecha];
+      const nombre=regs[0].feriadoNombre||"(sin nombre)";
+      cuerpo+=`── ${fecha} — ${nombre} ──\n`;
+      regs.forEach(a=>{
+        const c=colabs.find(x=>x.id===a.colabId);
+        const h=horasFeriado(a);
+        cuerpo+=`• ${c?.nombre||"—"} — Entrada: ${a.entrada||"(sin marcar)"} · Salida: ${a.salida||"(sin marcar)"} · Almuerzo: ${a.almuerzoRestado?"sí (-1h)":"no"} · Horas: ${h!==null?h+"h":"—"}\n`;
+      });
+      cuerpo+="\n";
     });
-    return {asunto:`Informe de asistencia - ${nombre} - ${feriadoFecha}`,cuerpo};
+    return {asunto:`Informe general de asistencia en feriados (${fechas.length} feriado${fechas.length===1?"":"s"})`,cuerpo};
   }
 
   // Filtros
@@ -1369,7 +1389,7 @@ function App(){
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
                 <div style={{fontSize:18,fontWeight:800,color:C.blanco}}>🎉 <span style={{color:C.azulL}}>Feriados</span></div>
-                <button onClick={()=>{setInformeFeriadoPara("");setShowInformeFeriado(true);}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>📧 Enviar informe</button>
+                <button onClick={()=>{setInformeFeriadoPara("");cargarInformeFeriadoGeneral();setShowInformeFeriado(true);}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>📧 Enviar informe</button>
               </div>
 
               <div style={{background:C.g1,borderRadius:14,padding:16,marginBottom:16,border:`1px solid ${C.g2}`}}>
@@ -1401,20 +1421,20 @@ function App(){
                       <div style={{fontSize:11,color:C.textoS}}>{c.area}</div>
                     </div>
                     {!reg&&(
-                      <button onClick={()=>marcarEntradaFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.verde,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>Marcar entrada</button>
+                      <button onClick={()=>agregarAsistFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.azul,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Agregar registro</button>
                     )}
-                    {reg&&!reg.salida&&(
+                    {reg&&(
                       <>
-                        <span style={{fontSize:12,color:C.textoM}}>Entrada: <b>{reg.entrada}</b></span>
-                        <button onClick={()=>marcarSalidaFeriado(c.id)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:C.naranja,color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>Marcar salida</button>
-                        <button onClick={()=>borrarAsistFeriado(c.id)} title="Cancelar" style={{padding:"7px 9px",borderRadius:8,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>✕</button>
-                      </>
-                    )}
-                    {reg&&reg.salida&&(
-                      <>
-                        <span style={{fontSize:12,color:C.textoM}}>{reg.entrada}–{reg.salida}</span>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <span style={{fontSize:10,color:C.textoS}}>Entrada</span>
+                          <input type="time" value={reg.entrada||""} onChange={e=>actualizarHoraFeriado(c.id,"entrada",e.target.value)} style={{...inp,padding:"6px 8px",width:110}}/>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <span style={{fontSize:10,color:C.textoS}}>Salida</span>
+                          <input type="time" value={reg.salida||""} onChange={e=>actualizarHoraFeriado(c.id,"salida",e.target.value)} style={{...inp,padding:"6px 8px",width:110}}/>
+                        </div>
                         <button onClick={()=>toggleAlmuerzoFeriado(c.id)} style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${reg.almuerzoRestado?C.azulL:C.g3}`,background:reg.almuerzoRestado?C.azulL+"25":"transparent",color:reg.almuerzoRestado?C.azulL:C.textoM,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>🍽 {reg.almuerzoRestado?"Almuerzo restado (-1h)":"Restar almuerzo"}</button>
-                        <span style={{background:C.verde+"20",color:C.verde,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:800}}>{horas}h</span>
+                        {horas!==null&&<span style={{background:C.verde+"20",color:C.verde,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:800}}>{horas}h</span>}
                         <button onClick={()=>borrarAsistFeriado(c.id)} title="Borrar" style={{padding:"7px 9px",borderRadius:8,border:`1px solid ${C.g3}`,background:C.g2,cursor:"pointer",fontSize:12}}>🗑️</button>
                       </>
                     )}
@@ -2065,7 +2085,7 @@ function App(){
       {showInformeFeriado&&(()=>{
         const {asunto,cuerpo}=generarInformeFeriadoTexto();
         return(
-          <Modal title="Enviar informe por correo" onClose={()=>setShowInformeFeriado(false)}>
+          <Modal title="Enviar informe general (todos los feriados)" onClose={()=>setShowInformeFeriado(false)}>
             <Field label="Para (correo del destinatario)">
               <input type="email" value={informeFeriadoPara} onChange={e=>setInformeFeriadoPara(e.target.value)} placeholder="ejemplo@correo.com" style={inp}/>
             </Field>
