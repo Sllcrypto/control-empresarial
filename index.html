@@ -1095,7 +1095,7 @@ function App(){
       const diasArea=regsArea.reduce((s,r)=>s+(r.dias||0),0);
       html+=`<h3 style="margin:18px 0 6px;color:#444;">${area} — ${diasArea} días</h3>`;
       html+=`<table style="${estiloTabla()}"><thead><tr>`;
-      ["Colaborador","Boleta","F. Inicio","F. Fin","Días","Estado"].forEach(h=>html+=`<th style="${estiloTH()}">${h}</th>`);
+      ["Colaborador","Boleta","F. Inicio","F. Fin","Días","Estado","RRHH"].forEach(h=>html+=`<th style="${estiloTH()}">${h}</th>`);
       html+=`</tr></thead><tbody>`;
       regsArea.forEach((r,i)=>{
         const c=getColab(r.colabId);
@@ -1107,6 +1107,7 @@ function App(){
           <td style="${td}">${fmtDate(r.fechaFin)}</td>
           <td style="${td};text-align:center;font-weight:700;">${r.dias}</td>
           <td style="${td}">${r.estado==="reservado"?"📌 Reservado":"✓ Confirmado"}</td>
+          <td style="${td};color:${r.rrhh?"#15803d":"#b45309"};font-weight:700;">${r.rrhh?"✓ Entregado":"⏳ Pendiente"}</td>
         </tr>`;
       });
       html+=`</tbody></table>`;
