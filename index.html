@@ -335,6 +335,9 @@ function App(){
   const [cafeView,setCafeView]=useState("control");
   const [cafeBusqueda,setCafeBusqueda]=useState("");
   const [showBorrarHist,setShowBorrarHist]=useState(false);
+  const [showInformeRRHH,setShowInformeRRHH]=useState(null); // null | "vacaciones" | "permisos" | "incapacidades"
+  const [informeRRHHPara,setInformeRRHHPara]=useState("");
+  const [informeRRHHCopiado,setInformeRRHHCopiado]=useState(false);
 
   // UI auditoría
   const [auditLog,setAuditLog]=useState([]);
@@ -992,6 +995,83 @@ function App(){
     }
   }
 
+  // ══ INFORMES RRHH ══
+  function generarInformeVacaciones(){
+    const fecha=new Date().toLocaleDateString("es-CR");
+    let cuerpo=`Informe de Vacaciones\nGenerado el ${fecha}\n\n`;
+    if(registros.length===0){cuerpo+="Sin registros de vacaciones.\n";return{asunto:`Informe de Vacaciones — ${fecha}`,cuerpo};}
+    AREAS.forEach(area=>{
+      const regsArea=registros.filter(r=>getColab(r.colabId)?.area===area);
+      if(!regsArea.length)return;
+      cuerpo+=`── ${area} ──\n`;
+      regsArea.forEach(r=>{
+        const c=getColab(r.colabId);
+        cuerpo+=`• ${c?.nombre||"—"} | Boleta #${r.boleta} | ${fmtDate(r.fechaInicio)} al ${fmtDate(r.fechaFin)} | ${r.dias} día(s) | ${r.estado==="reservado"?"📌 Reservado":"✓ Confirmado"} | RRHH: ${r.rrhh?"Entregado":"Pendiente"}\n`;
+      });
+      const diasArea=regsArea.reduce((s,r)=>s+(r.dias||0),0);
+      cuerpo+=`Total área: ${diasArea} días\n\n`;
+    });
+    const totalGeneral=registros.reduce((s,r)=>s+(r.dias||0),0);
+    cuerpo+=`Total general: ${totalGeneral} días en ${registros.length} registro(s).\n`;
+    return{asunto:`Informe de Vacaciones — ${fecha}`,cuerpo};
+  }
+  function generarInformePermisos(){
+    const fecha=new Date().toLocaleDateString("es-CR");
+    let cuerpo=`Informe de Permisos y Tiempo Extra\nGenerado el ${fecha}\n\n`;
+    cuerpo+=`══ PERMISOS DE SALIDA (${permisos.length}) ══\n\n`;
+    if(permisos.length===0){cuerpo+="Sin permisos registrados.\n\n";}
+    else{
+      permisos.forEach(p=>{
+        const c=getColab(p.colabId);const s=calcSaldoPermiso(p);
+        cuerpo+=`• ${c?.nombre||"—"} | ${p.fecha} | ${p.motivo} | ${p.duracion}${p.detalle?` | "${p.detalle}"`:""}`;
+        cuerpo+=` | Repuesto: ${minToDur(s.repuesto)} | Pendiente: ${s.pendiente>0?minToDur(s.pendiente):"Al día"}\n`;
+      });
+      cuerpo+="\n";
+    }
+    cuerpo+=`══ TIEMPO EXTRA (${tiempoExtra.length}) ══\n\n`;
+    if(tiempoExtra.length===0){cuerpo+="Sin tiempo extra registrado.\n";}
+    else{
+      tiempoExtra.forEach(t=>{
+        const c=getColab(t.colabId);const s=calcSaldoPermiso(t);
+        cuerpo+=`• ${c?.nombre||"—"} | ${t.fecha} | ${t.duracion}${t.motivo?` | ${t.motivo}`:""}${t.detalle?` | "${t.detalle}"`:""}`;
+        cuerpo+=` | Rep. empresa: ${minToDur(s.repuesto)} | Pendiente: ${s.pendiente>0?minToDur(s.pendiente):"Al día"}\n`;
+      });
+    }
+    return{asunto:`Informe de Permisos y Tiempo Extra — ${fecha}`,cuerpo};
+  }
+  function generarInformeIncapacidades(){
+    const fecha=new Date().toLocaleDateString("es-CR");
+    let cuerpo=`Informe de Incapacidades\nGenerado el ${fecha}\n\n`;
+    if(incapacidades.length===0){cuerpo+="Sin incapacidades registradas.\n";return{asunto:`Informe de Incapacidades — ${fecha}`,cuerpo};}
+    const porColab={};
+    incapacidades.forEach(i=>{if(!porColab[i.colabId])porColab[i.colabId]=[];porColab[i.colabId].push(i);});
+    Object.keys(porColab).forEach(colabId=>{
+      const c=getColab(parseInt(colabId));const lista=porColab[colabId];
+      const totalDias=lista.reduce((s,i)=>s+(i.dias||0),0);
+      cuerpo+=`${c?.nombre||"—"} (${c?.area||"—"}) — Total: ${totalDias} día(s)\n`;
+      lista.forEach(i=>{
+        cuerpo+=`  • ${fmtDate(i.fechaInicio)} al ${fmtDate(i.fechaFin)} | ${i.tipo} | ${i.dias} día(s)${i.detalle?` | "${i.detalle}"`:""}`;
+        cuerpo+="\n";
+      });
+      cuerpo+="\n";
+    });
+    const totalGeneral=incapacidades.reduce((s,i)=>s+(i.dias||0),0);
+    cuerpo+=`Total general: ${totalGeneral} día(s) en ${incapacidades.length} incapacidad(es).\n`;
+    return{asunto:`Informe de Incapacidades — ${fecha}`,cuerpo};
+  }
+  async function copiarInformeRRHH(texto){
+    try{
+      await navigator.clipboard.writeText(texto);
+      setInformeRRHHCopiado(true);setTimeout(()=>setInformeRRHHCopiado(false),2500);
+    }catch{
+      const ta=document.createElement("textarea");
+      ta.value=texto;ta.style.position="fixed";ta.style.opacity="0";
+      document.body.appendChild(ta);ta.focus();ta.select();
+      try{document.execCommand("copy");setInformeRRHHCopiado(true);setTimeout(()=>setInformeRRHHCopiado(false),2500);}catch{}
+      document.body.removeChild(ta);
+    }
+  }
+
   // Filtros
   const regsFiltrados=registros.filter(r=>{
     const c=getColab(r.colabId);
@@ -1063,6 +1143,7 @@ function App(){
                 {busqueda&&<button onClick={()=>setBusqueda("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",color:C.textoM,fontSize:16,cursor:"pointer"}}>×</button>}
               </div>
               <button onClick={()=>{setShowRegForm(true);setRegEdit(null);setRegForm({colabId:"",boleta:"",fechaInicio:"",fechaFin:"",mes:MESES[new Date().getMonth()],dias:"",estado:"confirmado"});setConflicto(null);}} style={btnP}>+ Nuevo</button>
+              <button onClick={()=>{setInformeRRHHCopiado(false);setShowInformeRRHH("vacaciones");}} style={{...btnA,fontSize:12}}>📧 Enviar a RRHH</button>
             </div>
 
             {regsFiltrados.length===0
@@ -1574,7 +1655,8 @@ function App(){
         {/* ══ INCAPACIDADES ══ */}
         {view==="incapacidades"&&(
           <div>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14,gap:8}}>
+              <button onClick={()=>{setInformeRRHHCopiado(false);setShowInformeRRHH("incapacidades");}} style={{...btnA,fontSize:12}}>📧 Enviar a RRHH</button>
               <button onClick={()=>{setShowIncapForm(true);setIncapEdit(null);setIncapForm({colabId:"",fechaInicio:"",fechaFin:"",tipo:"Enfermedad",detalle:""}); }} style={{padding:"9px 16px",borderRadius:8,border:"none",background:"#7C3AED",color:C.blanco,fontSize:13,fontWeight:700,cursor:"pointer"}}>{"+ Nueva incapacidad"}</button>
             </div>
             {incapacidades.length===0
@@ -1612,9 +1694,12 @@ function App(){
         {/* ══ PERMISOS ESPECIALES ══ */}
         {view==="permisos"&&(
           <div>
-            <div style={{display:"flex",gap:6,marginBottom:12}}>
-              <button onClick={()=>setPermisoTab("salida")} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,background:permisoTab==="salida"?"#4ADE80":C.g2,color:permisoTab==="salida"?C.negro:C.textoM}}>{"📤 Permisos salida"}</button>
-              <button onClick={()=>setPermisoTab("extra")} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,background:permisoTab==="extra"?C.amarillo:C.g2,color:permisoTab==="extra"?C.negro:C.textoM}}>{"📥 Tiempo extra"}</button>
+            <div style={{display:"flex",gap:6,marginBottom:12,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>setPermisoTab("salida")} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,background:permisoTab==="salida"?"#4ADE80":C.g2,color:permisoTab==="salida"?C.negro:C.textoM}}>{"📤 Permisos salida"}</button>
+                <button onClick={()=>setPermisoTab("extra")} style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,background:permisoTab==="extra"?C.amarillo:C.g2,color:permisoTab==="extra"?C.negro:C.textoM}}>{"📥 Tiempo extra"}</button>
+              </div>
+              <button onClick={()=>{setInformeRRHHCopiado(false);setShowInformeRRHH("permisos");}} style={{...btnA,fontSize:12}}>📧 Enviar a RRHH</button>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
               <select value={filterPermisoColab} onChange={e=>setFilterPermisoColab(e.target.value)} style={{...inp,width:"auto",flex:1}}>
@@ -2450,6 +2535,35 @@ function App(){
           </div>
         </Modal>
       )}
+
+      {showInformeRRHH&&(()=>{
+        const titulos={vacaciones:"Informe de Vacaciones para RRHH",permisos:"Informe de Permisos y Tiempo Extra para RRHH",incapacidades:"Informe de Incapacidades para RRHH"};
+        const {asunto,cuerpo}=showInformeRRHH==="vacaciones"?generarInformeVacaciones():showInformeRRHH==="permisos"?generarInformePermisos():generarInformeIncapacidades();
+        const textoCompleto=`Asunto: ${asunto}\n\n${cuerpo}`;
+        return(
+          <Modal title={titulos[showInformeRRHH]} onClose={()=>setShowInformeRRHH(null)}>
+            <button onClick={()=>copiarInformeRRHH(textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:6}}>
+              {informeRRHHCopiado?"✓ Copiado — pegalo en el correo":"📋 Copiar informe (1 toque)"}
+            </button>
+            <div style={{fontSize:11,color:C.textoS,marginBottom:14,textAlign:"center"}}>Copiá el texto y pegalo en el cuerpo de tu correo (Ctrl+V o mantener → Pegar).</div>
+            <Field label="Vista previa">
+              <textarea readOnly value={textoCompleto} style={{...inp,minHeight:200,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
+            </Field>
+            <div style={{borderTop:`1px solid ${C.g3}`,paddingTop:14,marginTop:8}}>
+              <div style={{fontSize:11,color:C.textoS,marginBottom:8}}>Opcional: intentar abrir directo en tu correo</div>
+              <Field label="Para (correo de RRHH)">
+                <input type="email" value={informeRRHHPara} onChange={e=>setInformeRRHHPara(e.target.value)} placeholder="ejemplo@empresa.com" style={inp}/>
+              </Field>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <button onClick={()=>abrirEmailCompose("gmail",informeRRHHPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Gmail</button>
+                <button onClick={()=>abrirEmailCompose("outlook",informeRRHHPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Outlook</button>
+                <button onClick={()=>abrirEmailCompose("yahoo",informeRRHHPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Yahoo</button>
+                <button onClick={()=>abrirEmailCompose("otro",informeRRHHPara,asunto,cuerpo)} style={{...btnS,padding:"10px"}}>Otro / predeterminado</button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {showBorrarHist&&(
         <Modal title="¿Borrar historial de café?" onClose={()=>setShowBorrarHist(false)}>
