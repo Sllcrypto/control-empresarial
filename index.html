@@ -338,6 +338,10 @@ function App(){
   const [showInformeRRHH,setShowInformeRRHH]=useState(null); // null | "vacaciones" | "permisos" | "incapacidades"
   const [informeRRHHPara,setInformeRRHHPara]=useState("");
   const [informeRRHHCopiado,setInformeRRHHCopiado]=useState(false);
+  const [informeRRHHCopiadoHTML,setInformeRRHHCopiadoHTML]=useState(false);
+  const [soloNuevosRRHH,setSoloNuevosRRHH]=useState(false);
+  const [rrhhVacCp,setRrhhVacCp]=useState(()=>{try{return parseInt(localStorage.getItem("ce_rrhh_vac_cp")||"0");}catch{return 0;}}); // ID del último registro enviado
+  const [rrhhVacSel,setRrhhVacSel]=useState(null); // null=auto | Set<id>
 
   // UI auditoría
   const [auditLog,setAuditLog]=useState([]);
@@ -996,23 +1000,26 @@ function App(){
   }
 
   // ══ INFORMES RRHH ══
-  function generarInformeVacaciones(){
+  function generarInformeVacaciones(selIds=null){
     const fecha=new Date().toLocaleDateString("es-CR");
-    let cuerpo=`Informe de Vacaciones\nGenerado el ${fecha}\n\n`;
-    if(registros.length===0){cuerpo+="Sin registros de vacaciones.\n";return{asunto:`Informe de Vacaciones — ${fecha}`,cuerpo};}
+    const regsBase=selIds?registros.filter(r=>selIds.has(r.id)):registros;
+    const etiqueta=selIds?` (${regsBase.length} seleccionados)`:"";
+    let cuerpo=`Informe de Vacaciones${etiqueta}\nGenerado el ${fecha}\n\n`;
+    if(regsBase.length===0){cuerpo+="Sin registros seleccionados.\n";return{asunto:`Informe de Vacaciones — ${fecha}`,cuerpo};}
     AREAS.forEach(area=>{
-      const regsArea=registros.filter(r=>getColab(r.colabId)?.area===area);
+      const regsArea=regsBase.filter(r=>getColab(r.colabId)?.area===area);
       if(!regsArea.length)return;
       cuerpo+=`── ${area} ──\n`;
       regsArea.forEach(r=>{
         const c=getColab(r.colabId);
-        cuerpo+=`• ${c?.nombre||"—"} | Boleta #${r.boleta} | ${fmtDate(r.fechaInicio)} al ${fmtDate(r.fechaFin)} | ${r.dias} día(s) | ${r.estado==="reservado"?"📌 Reservado":"✓ Confirmado"} | RRHH: ${r.rrhh?"Entregado":"Pendiente"}\n`;
+        cuerpo+=`• ${c?.nombre||"—"} | Boleta #${r.boleta} | ${fmtDate(r.fechaInicio)} al ${fmtDate(r.fechaFin)} | ${r.dias} día(s) | ${r.estado==="reservado"?"📌 Reservado":"✓ Confirmado"}\n`;
       });
       const diasArea=regsArea.reduce((s,r)=>s+(r.dias||0),0);
       cuerpo+=`Total área: ${diasArea} días\n\n`;
     });
-    const totalGeneral=registros.reduce((s,r)=>s+(r.dias||0),0);
-    cuerpo+=`Total general: ${totalGeneral} días en ${registros.length} registro(s).\n`;
+    const totalGeneral=regsBase.reduce((s,r)=>s+(r.dias||0),0);
+    cuerpo+=`Total general: ${totalGeneral} días en ${regsBase.length} registro(s).\n`;
+    cuerpo+=`\n──────────────────────────────────────\nNota: si al revisar este informe aparecen dos registros con el mismo número de boleta y fechas diferentes, es porque uno de los días dentro del rango no corresponde a vacaciones (el colaborador trabajó ese día).\n`;
     return{asunto:`Informe de Vacaciones — ${fecha}`,cuerpo};
   }
   function generarInformePermisos(){
@@ -1037,6 +1044,7 @@ function App(){
         cuerpo+=` | Rep. empresa: ${minToDur(s.repuesto)} | Pendiente: ${s.pendiente>0?minToDur(s.pendiente):"Al día"}\n`;
       });
     }
+    cuerpo+=`\n──────────────────────────────────────\nNota: si al revisar este informe aparecen dos registros con el mismo número de boleta y fechas diferentes, es porque uno de los días dentro del rango no corresponde a vacaciones (el colaborador trabajó ese día).\n`;
     return{asunto:`Informe de Permisos y Tiempo Extra — ${fecha}`,cuerpo};
   }
   function generarInformeIncapacidades(){
@@ -1057,6 +1065,7 @@ function App(){
     });
     const totalGeneral=incapacidades.reduce((s,i)=>s+(i.dias||0),0);
     cuerpo+=`Total general: ${totalGeneral} día(s) en ${incapacidades.length} incapacidad(es).\n`;
+    cuerpo+=`\n──────────────────────────────────────\nNota: si al revisar este informe aparecen dos registros con el mismo número de boleta y fechas diferentes, es porque uno de los días dentro del rango no corresponde a vacaciones (el colaborador trabajó ese día).\n`;
     return{asunto:`Informe de Incapacidades — ${fecha}`,cuerpo};
   }
   async function copiarInformeRRHH(texto){
@@ -1069,6 +1078,125 @@ function App(){
       document.body.appendChild(ta);ta.focus();ta.select();
       try{document.execCommand("copy");setInformeRRHHCopiado(true);setTimeout(()=>setInformeRRHHCopiado(false),2500);}catch{}
       document.body.removeChild(ta);
+    }
+  }
+  function estiloTabla(){return`font-family:Arial,sans-serif;border-collapse:collapse;width:100%;font-size:13px;`;}
+  function estiloTH(){return`border:1px solid #ccc;padding:7px 10px;background:#f0f0f0;text-align:left;font-weight:700;`;}
+  function estiloTD(par){return`border:1px solid #ccc;padding:6px 10px;background:${par?"#fafafa":"#ffffff"};`;}
+  function generarHTMLVacaciones(selIds=null){
+    const fecha=new Date().toLocaleDateString("es-CR");
+    const regsBase=selIds?registros.filter(r=>selIds.has(r.id)):registros;
+    const titulo=selIds?`Informe de Vacaciones (${regsBase.length} seleccionados)`:"Informe de Vacaciones";
+    let html=`<div style="font-family:Arial,sans-serif;"><h2 style="margin:0 0 4px;">${titulo}</h2><p style="margin:0 0 16px;color:#666;font-size:12px;">Generado el ${fecha}</p>`;
+    if(regsBase.length===0){html+=`<p style="color:#888;">Sin registros seleccionados.</p></div>`;return html;}
+    AREAS.forEach(area=>{
+      const regsArea=regsBase.filter(r=>getColab(r.colabId)?.area===area);
+      if(!regsArea.length)return;
+      const diasArea=regsArea.reduce((s,r)=>s+(r.dias||0),0);
+      html+=`<h3 style="margin:18px 0 6px;color:#444;">${area} — ${diasArea} días</h3>`;
+      html+=`<table style="${estiloTabla()}"><thead><tr>`;
+      ["Colaborador","Boleta","F. Inicio","F. Fin","Días","Estado"].forEach(h=>html+=`<th style="${estiloTH()}">${h}</th>`);
+      html+=`</tr></thead><tbody>`;
+      regsArea.forEach((r,i)=>{
+        const c=getColab(r.colabId);
+        const td=estiloTD(i%2===0);
+        html+=`<tr>
+          <td style="${td}">${c?.nombre||"—"}</td>
+          <td style="${td}">${r.boleta}</td>
+          <td style="${td}">${fmtDate(r.fechaInicio)}</td>
+          <td style="${td}">${fmtDate(r.fechaFin)}</td>
+          <td style="${td};text-align:center;font-weight:700;">${r.dias}</td>
+          <td style="${td}">${r.estado==="reservado"?"📌 Reservado":"✓ Confirmado"}</td>
+        </tr>`;
+      });
+      html+=`</tbody></table>`;
+    });
+    const totalGeneral=regsBase.reduce((s,r)=>s+(r.dias||0),0);
+    html+=`<p style="margin:14px 0 0;font-weight:700;">Total general: ${totalGeneral} días en ${regsBase.length} registro(s).</p>`;
+    html+=`<p style="margin:16px 0 0;font-size:11px;color:#555;border-top:1px solid #ddd;padding-top:8px;"><strong>Nota:</strong> si al revisar este informe aparecen dos registros con el mismo número de boleta y fechas diferentes, es porque uno de los días dentro del rango no corresponde a vacaciones (el colaborador trabajó ese día).</p></div>`;
+    return html;
+  }
+  function generarHTMLPermisos(){
+    const fecha=new Date().toLocaleDateString("es-CR");
+    let html=`<div style="font-family:Arial,sans-serif;"><h2 style="margin:0 0 4px;">Informe de Permisos y Tiempo Extra</h2><p style="margin:0 0 16px;color:#666;font-size:12px;">Generado el ${fecha}</p>`;
+    // Permisos de salida
+    html+=`<h3 style="margin:0 0 6px;color:#444;">📤 Permisos de salida (${permisos.length})</h3>`;
+    if(permisos.length===0){html+=`<p style="color:#888;">Sin permisos registrados.</p>`;}
+    else{
+      html+=`<table style="${estiloTabla()}"><thead><tr>`;
+      ["Colaborador","Fecha","Motivo","Duración","Repuesto","Pendiente"].forEach(h=>html+=`<th style="${estiloTH()}">${h}</th>`);
+      html+=`</tr></thead><tbody>`;
+      permisos.forEach((p,i)=>{
+        const c=getColab(p.colabId);const s=calcSaldoPermiso(p);const td=estiloTD(i%2===0);
+        html+=`<tr>
+          <td style="${td}">${c?.nombre||"—"}</td>
+          <td style="${td}">${p.fecha}</td>
+          <td style="${td}">${p.motivo}</td>
+          <td style="${td};text-align:center;">${p.duracion}</td>
+          <td style="${td};text-align:center;color:#15803d;">${minToDur(s.repuesto)}</td>
+          <td style="${td};text-align:center;color:${s.pendiente>0?"#dc2626":"#15803d"};font-weight:700;">${s.pendiente>0?minToDur(s.pendiente):"✓ Al día"}</td>
+        </tr>`;
+      });
+      html+=`</tbody></table>`;
+    }
+    // Tiempo extra
+    html+=`<h3 style="margin:20px 0 6px;color:#444;">📥 Tiempo extra (${tiempoExtra.length})</h3>`;
+    if(tiempoExtra.length===0){html+=`<p style="color:#888;">Sin tiempo extra registrado.</p>`;}
+    else{
+      html+=`<table style="${estiloTabla()}"><thead><tr>`;
+      ["Colaborador","Fecha","Duración","Razón","Rep. Empresa","Pendiente"].forEach(h=>html+=`<th style="${estiloTH()}">${h}</th>`);
+      html+=`</tr></thead><tbody>`;
+      tiempoExtra.forEach((t,i)=>{
+        const c=getColab(t.colabId);const s=calcSaldoPermiso(t);const td=estiloTD(i%2===0);
+        html+=`<tr>
+          <td style="${td}">${c?.nombre||"—"}</td>
+          <td style="${td}">${t.fecha}</td>
+          <td style="${td};text-align:center;">${t.duracion}</td>
+          <td style="${td}">${t.motivo||"—"}</td>
+          <td style="${td};text-align:center;color:#15803d;">${minToDur(s.repuesto)}</td>
+          <td style="${td};text-align:center;color:${s.pendiente>0?"#dc2626":"#15803d"};font-weight:700;">${s.pendiente>0?minToDur(s.pendiente):"✓ Al día"}</td>
+        </tr>`;
+      });
+      html+=`</tbody></table>`;
+    }
+    html+=`<p style="margin:16px 0 0;font-size:11px;color:#555;border-top:1px solid #ddd;padding-top:8px;"><strong>Nota:</strong> si al revisar este informe aparecen dos registros con el mismo número de boleta y fechas diferentes, es porque uno de los días dentro del rango no corresponde a vacaciones (el colaborador trabajó ese día).</p></div>`;
+    return html;
+  }
+  function generarHTMLIncapacidades(){
+    const fecha=new Date().toLocaleDateString("es-CR");
+    let html=`<div style="font-family:Arial,sans-serif;"><h2 style="margin:0 0 4px;">Informe de Incapacidades</h2><p style="margin:0 0 16px;color:#666;font-size:12px;">Generado el ${fecha}</p>`;
+    if(incapacidades.length===0){html+=`<p style="color:#888;">Sin incapacidades registradas.</p></div>`;return html;}
+    html+=`<table style="${estiloTabla()}"><thead><tr>`;
+    ["Colaborador","Área","F. Inicio","F. Fin","Tipo","Días","Detalle"].forEach(h=>html+=`<th style="${estiloTH()}">${h}</th>`);
+    html+=`</tr></thead><tbody>`;
+    incapacidades.forEach((i,idx)=>{
+      const c=getColab(i.colabId);const td=estiloTD(idx%2===0);
+      html+=`<tr>
+        <td style="${td}">${c?.nombre||"—"}</td>
+        <td style="${td}">${c?.area||"—"}</td>
+        <td style="${td}">${fmtDate(i.fechaInicio)}</td>
+        <td style="${td}">${fmtDate(i.fechaFin)}</td>
+        <td style="${td}">${i.tipo}</td>
+        <td style="${td};text-align:center;font-weight:700;">${i.dias}</td>
+        <td style="${td};color:#666;font-style:italic;">${i.detalle||"—"}</td>
+      </tr>`;
+    });
+    html+=`</tbody></table>`;
+    const totalGeneral=incapacidades.reduce((s,i)=>s+(i.dias||0),0);
+    html+=`<p style="margin:14px 0 0;font-weight:700;">Total general: ${totalGeneral} día(s) en ${incapacidades.length} incapacidad(es).</p>`;
+    html+=`<p style="margin:16px 0 0;font-size:11px;color:#555;border-top:1px solid #ddd;padding-top:8px;"><strong>Nota:</strong> si al revisar este informe aparecen dos registros con el mismo número de boleta y fechas diferentes, es porque uno de los días dentro del rango no corresponde a vacaciones (el colaborador trabajó ese día).</p></div>`;
+    return html;
+  }
+  async function copiarInformeRRHHConFormato(htmlContent,textoPlano){
+    try{
+      const item=new ClipboardItem({
+        "text/html":new Blob([htmlContent],{type:"text/html"}),
+        "text/plain":new Blob([textoPlano],{type:"text/plain"}),
+      });
+      await navigator.clipboard.write([item]);
+      setInformeRRHHCopiadoHTML(true);setTimeout(()=>setInformeRRHHCopiadoHTML(false),2500);
+    }catch{
+      copiarInformeRRHH(textoPlano);
     }
   }
 
@@ -1143,7 +1271,7 @@ function App(){
                 {busqueda&&<button onClick={()=>setBusqueda("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",color:C.textoM,fontSize:16,cursor:"pointer"}}>×</button>}
               </div>
               <button onClick={()=>{setShowRegForm(true);setRegEdit(null);setRegForm({colabId:"",boleta:"",fechaInicio:"",fechaFin:"",mes:MESES[new Date().getMonth()],dias:"",estado:"confirmado"});setConflicto(null);}} style={btnP}>+ Nuevo</button>
-              <button onClick={()=>{setInformeRRHHCopiado(false);setShowInformeRRHH("vacaciones");}} style={{...btnA,fontSize:12}}>📧 Enviar a RRHH</button>
+              <button onClick={()=>{setInformeRRHHCopiado(false);setRrhhVacSel(null);setShowInformeRRHH("vacaciones");}} style={{...btnA,fontSize:12}}>📧 Enviar a RRHH</button>
             </div>
 
             {regsFiltrados.length===0
@@ -1568,7 +1696,7 @@ function App(){
 
               <div style={{background:C.g1,borderRadius:14,padding:16,marginBottom:16,border:`1px solid ${C.g2}`}}>
                 <Field label="Fecha">
-                  <input type="date" value={feriadoFecha} onChange={e=>{setFeriadoFecha(e.target.value);setFeriadoNombreManual("");}} style={inp}/>
+                  <input type="date" lang="es-CR" value={feriadoFecha} onChange={e=>{setFeriadoFecha(e.target.value);setFeriadoNombreManual("");}} style={inp}/>
                 </Field>
                 {feriadoDetectado?(
                   <div style={{marginTop:10,background:C.naranja+"15",border:`1.5px solid ${C.naranja}40`,borderRadius:10,padding:"10px 12px"}}>
@@ -2189,8 +2317,8 @@ function App(){
           </Field>
           <Field label="N° de boleta"><input value={regForm.boleta} onChange={e=>setRegForm(p=>({...p,boleta:e.target.value}))} style={inp} placeholder="Ej. 2001"/></Field>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Field label="Fecha inicio"><input type="date" value={regForm.fechaInicio} onChange={e=>setRegForm(p=>({...p,fechaInicio:e.target.value}))} style={inp}/></Field>
-            <Field label="Fecha fin"><input type="date" value={regForm.fechaFin} onChange={e=>setRegForm(p=>({...p,fechaFin:e.target.value}))} style={inp}/></Field>
+            <Field label="Fecha inicio"><input type="date" lang="es-CR" value={regForm.fechaInicio} onChange={e=>setRegForm(p=>({...p,fechaInicio:e.target.value}))} style={inp}/></Field>
+            <Field label="Fecha fin"><input type="date" lang="es-CR" value={regForm.fechaFin} onChange={e=>setRegForm(p=>({...p,fechaFin:e.target.value}))} style={inp}/></Field>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <Field label="Mes"><select value={regForm.mes} onChange={e=>setRegForm(p=>({...p,mes:e.target.value}))} style={inp}>{MESES.map(m=><option key={m}>{m}</option>)}</select></Field>
@@ -2365,7 +2493,7 @@ function App(){
             Definí una semana de referencia y qué grupo entra temprano esa semana. Desde ahí la app calcula sola la rotación de cualquier otra semana.
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Field label="Semana de referencia (lunes)"><input type="date" value={horarioCfgForm.semanaAncla} onChange={e=>setHorarioCfgForm(p=>({...p,semanaAncla:semanaLunes(e.target.value)}))} style={inp}/></Field>
+            <Field label="Semana de referencia (lunes)"><input type="date" lang="es-CR" value={horarioCfgForm.semanaAncla} onChange={e=>setHorarioCfgForm(p=>({...p,semanaAncla:semanaLunes(e.target.value)}))} style={inp}/></Field>
             <Field label="Grupo temprano esa semana">
               <select value={horarioCfgForm.grupoTempranoAncla} onChange={e=>setHorarioCfgForm(p=>({...p,grupoTempranoAncla:e.target.value}))} style={inp}>
                 <option value="grupo1">Grupo 1</option>
@@ -2415,7 +2543,7 @@ function App(){
               </div>
             )}
             <Field label={esPermiso?"Fecha de reposición":"Fecha"}>
-              <input type="date" value={reposForm.fecha} onChange={e=>setReposForm(p=>({...p,fecha:e.target.value}))} style={inp}/>
+              <input type="date" lang="es-CR" value={reposForm.fecha} onChange={e=>setReposForm(p=>({...p,fecha:e.target.value}))} style={inp}/>
             </Field>
             <Field label="Tiempo repuesto">
               <input value={reposForm.duracion} onChange={e=>setReposForm(p=>({...p,duracion:e.target.value}))} style={inp} placeholder="Ej: 1h, 30m, 1h 30m, 1:30"/>
@@ -2441,8 +2569,8 @@ function App(){
             </select>
           </Field>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Field label="Fecha inicio"><input type="date" value={incapForm.fechaInicio} onChange={e=>setIncapForm(p=>({...p,fechaInicio:e.target.value}))} style={inp}/></Field>
-            <Field label="Fecha fin"><input type="date" value={incapForm.fechaFin} onChange={e=>setIncapForm(p=>({...p,fechaFin:e.target.value}))} style={inp}/></Field>
+            <Field label="Fecha inicio"><input type="date" lang="es-CR" value={incapForm.fechaInicio} onChange={e=>setIncapForm(p=>({...p,fechaInicio:e.target.value}))} style={inp}/></Field>
+            <Field label="Fecha fin"><input type="date" lang="es-CR" value={incapForm.fechaFin} onChange={e=>setIncapForm(p=>({...p,fechaFin:e.target.value}))} style={inp}/></Field>
           </div>
           {incapForm.fechaInicio&&incapForm.fechaFin&&(
             <div style={{background:"#2E1065",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:13,color:"#C084FC",fontWeight:700}}>
@@ -2475,7 +2603,7 @@ function App(){
             </select>
           </Field>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Field label="Fecha"><input type="date" value={extraForm.fecha} onChange={e=>setExtraForm(p=>({...p,fecha:e.target.value}))} style={inp}/></Field>
+            <Field label="Fecha"><input type="date" lang="es-CR" value={extraForm.fecha} onChange={e=>setExtraForm(p=>({...p,fecha:e.target.value}))} style={inp}/></Field>
             <Field label="Duración"><input value={extraForm.duracion} onChange={e=>setExtraForm(p=>({...p,duracion:e.target.value}))} style={inp} placeholder="Ej. 2h 30min"/></Field>
           </div>
           <Field label="Razón (opcional)"><input value={extraForm.motivo} onChange={e=>setExtraForm(p=>({...p,motivo:e.target.value}))} style={inp} placeholder="Ej. Cierre de mes..."/></Field>
@@ -2498,7 +2626,7 @@ function App(){
             </select>
           </Field>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Field label="Fecha"><input type="date" value={permisoForm.fecha} onChange={e=>setPermisoForm(p=>({...p,fecha:e.target.value}))} style={inp}/></Field>
+            <Field label="Fecha"><input type="date" lang="es-CR" value={permisoForm.fecha} onChange={e=>setPermisoForm(p=>({...p,fecha:e.target.value}))} style={inp}/></Field>
             <Field label="Duración"><input value={permisoForm.duracion} onChange={e=>setPermisoForm(p=>({...p,duracion:e.target.value}))} style={inp} placeholder="Ej. 1h 30min"/></Field>
           </div>
           <Field label="Motivo">
@@ -2538,18 +2666,112 @@ function App(){
 
       {showInformeRRHH&&(()=>{
         const titulos={vacaciones:"Informe de Vacaciones para RRHH",permisos:"Informe de Permisos y Tiempo Extra para RRHH",incapacidades:"Informe de Incapacidades para RRHH"};
-        const {asunto,cuerpo}=showInformeRRHH==="vacaciones"?generarInformeVacaciones():showInformeRRHH==="permisos"?generarInformePermisos():generarInformeIncapacidades();
+        const esVac=showInformeRRHH==="vacaciones";
+        // Para vacaciones: lista ordenada por ID, selección manual con checkpoint
+        const regsOrdenados=esVac?[...registros].sort((a,b)=>a.id-b.id):[];
+        const selActiva=esVac?(rrhhVacSel!==null?rrhhVacSel:new Set(regsOrdenados.filter(r=>r.id>rrhhVacCp).map(r=>r.id))):null;
+        function toggleReg(id){
+          const base=rrhhVacSel!==null?new Set(rrhhVacSel):new Set(regsOrdenados.filter(r=>r.id>rrhhVacCp).map(r=>r.id));
+          if(base.has(id))base.delete(id);else base.add(id);
+          setRrhhVacSel(new Set(base));
+        }
+        function marcarCheckpoint(id){
+          try{localStorage.setItem("ce_rrhh_vac_cp",String(id));}catch{}
+          setRrhhVacCp(id);
+          setRrhhVacSel(null); // vuelve a auto: nuevos = los de arriba de la marca
+        }
+        function avanzarCpAlEnviado(){
+          if(!selActiva||selActiva.size===0)return;
+          const maxId=Math.max(...selActiva);
+          try{localStorage.setItem("ce_rrhh_vac_cp",String(maxId));}catch{}
+          setRrhhVacCp(maxId);
+          setRrhhVacSel(null);
+        }
+        const {asunto,cuerpo}=esVac?generarInformeVacaciones(selActiva):showInformeRRHH==="permisos"?generarInformePermisos():generarInformeIncapacidades();
+        const htmlContent=esVac?generarHTMLVacaciones(selActiva):showInformeRRHH==="permisos"?generarHTMLPermisos():generarHTMLIncapacidades();
         const textoCompleto=`Asunto: ${asunto}\n\n${cuerpo}`;
         return(
           <Modal title={titulos[showInformeRRHH]} onClose={()=>setShowInformeRRHH(null)}>
-            <button onClick={()=>copiarInformeRRHH(textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:6}}>
-              {informeRRHHCopiado?"✓ Copiado — pegalo en el correo":"📋 Copiar informe (1 toque)"}
+            {/* ── Selector de registros (solo vacaciones) ── */}
+            {esVac&&(
+              <div style={{marginBottom:14}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                  <div style={{fontWeight:700,fontSize:13,color:C.blanco}}>Seleccioná qué registros incluir</div>
+                  <div style={{fontSize:11,color:C.textoS}}>{selActiva.size} de {regsOrdenados.length} seleccionados</div>
+                </div>
+                <div style={{background:C.g1,borderRadius:10,overflow:"hidden",border:`1px solid ${C.g3}`,maxHeight:220,overflowY:"auto"}}>
+                  {regsOrdenados.length===0&&<div style={{padding:"12px",color:C.textoS,fontSize:13}}>Sin registros.</div>}
+                  {regsOrdenados.map((r,idx)=>{
+                    const c=getColab(r.colabId);
+                    const esCp=r.id===rrhhVacCp; // es la última marca enviada
+                    const esSel=selActiva.has(r.id);
+                    const esPasado=r.id<=rrhhVacCp;
+                    return(
+                      <React.Fragment key={r.id}>
+                        {/* Línea divisoria DESPUÉS del registro marcado como checkpoint */}
+                        {esCp&&(
+                          <div style={{background:"#1a2a1a",borderTop:"2px dashed #4ADE80",borderBottom:"2px dashed #4ADE80",padding:"4px 12px",display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:10,color:"#4ADE80",fontWeight:700}}>✅ HASTA AQUÍ SE ENVIÓ EL ÚLTIMO REPORTE</span>
+                          </div>
+                        )}
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:esSel?"#1a1500":esPasado?C.g2:C.g1,borderBottom:`1px solid ${C.g3}`,opacity:esPasado&&!esSel?0.5:1,transition:"background .12s"}}>
+                          {/* Checkbox */}
+                          <input type="checkbox" checked={esSel} onChange={()=>toggleReg(r.id)} style={{width:15,height:15,cursor:"pointer",accentColor:C.naranja}}/>
+                          {/* Info del registro */}
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:esSel?700:500,color:esSel?C.blanco:C.textoM,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                              #{r.boleta} — {c?.nombre||"—"}
+                            </div>
+                            <div style={{fontSize:10,color:C.textoS,marginTop:1}}>
+                              {fmtDate(r.fechaInicio)} al {fmtDate(r.fechaFin)} · {r.dias} día(s) · {c?.area||"—"}
+                            </div>
+                          </div>
+                          {/* Botón marcar checkpoint */}
+                          <button
+                            onClick={()=>marcarCheckpoint(r.id)}
+                            title="Marcar hasta aquí como enviado"
+                            style={{padding:"3px 8px",borderRadius:6,border:`1px solid ${esCp?"#4ADE80":C.g3}`,background:esCp?"#14532D":"transparent",color:esCp?"#4ADE80":C.textoS,fontSize:9,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}
+                          >{esCp?"✅ Marca aquí":"📌 Marcar"}</button>
+                        </div>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+                <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}>
+                  <button onClick={()=>setRrhhVacSel(new Set(regsOrdenados.map(r=>r.id)))} style={{padding:"5px 10px",borderRadius:6,border:`1px solid ${C.g3}`,background:"transparent",color:C.textoM,fontSize:11,cursor:"pointer"}}>Seleccionar todos</button>
+                  <button onClick={()=>setRrhhVacSel(new Set())} style={{padding:"5px 10px",borderRadius:6,border:`1px solid ${C.g3}`,background:"transparent",color:C.textoM,fontSize:11,cursor:"pointer"}}>Deseleccionar todos</button>
+                  <button onClick={()=>setRrhhVacSel(null)} style={{padding:"5px 10px",borderRadius:6,border:`1px solid ${C.naranja}`,background:"transparent",color:C.naranja,fontSize:11,cursor:"pointer"}}>↺ Restaurar automático</button>
+                </div>
+              </div>
+            )}
+            {/* Botón principal: tabla con formato */}
+            <button onClick={()=>copiarInformeRRHHConFormato(htmlContent,textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:6}}>
+              {informeRRHHCopiadoHTML?"✓ Copiado con formato — pegalo en el correo":"📋 Copiar tabla con formato (1 toque)"}
             </button>
-            <div style={{fontSize:11,color:C.textoS,marginBottom:14,textAlign:"center"}}>Copiá el texto y pegalo en el cuerpo de tu correo (Ctrl+V o mantener → Pegar).</div>
-            <Field label="Vista previa">
-              <textarea readOnly value={textoCompleto} style={{...inp,minHeight:200,resize:"vertical",fontFamily:"monospace",fontSize:12}}/>
-            </Field>
-            <div style={{borderTop:`1px solid ${C.g3}`,paddingTop:14,marginTop:8}}>
+            <div style={{fontSize:11,color:C.textoS,marginBottom:6,textAlign:"center"}}>Funciona en compu y celular — solo pegá (Ctrl+V o mantener → Pegar) en el correo y queda como tabla.</div>
+            {esVac&&selActiva&&selActiva.size>0&&(
+              <button onClick={avanzarCpAlEnviado} style={{...btnS,width:"100%",padding:"8px",fontSize:12,marginBottom:14,border:`1.5px solid #4ADE80`,color:"#4ADE80"}}>
+                ✅ Ya lo envié — mover marca al último seleccionado (#{Math.max(...selActiva)})
+              </button>
+            )}
+
+            {/* Vista previa de la tabla */}
+            <div style={{background:"#fff",borderRadius:10,padding:12,marginBottom:14,overflowX:"auto",maxHeight:260,overflowY:"auto",border:`1px solid ${C.g3}`}}>
+              <div style={{fontSize:10,color:C.textoS,marginBottom:6,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Vista previa (así se ve en el correo)</div>
+              <div dangerouslySetInnerHTML={{__html:htmlContent}}/>
+            </div>
+
+            {/* Texto plano como alternativa */}
+            <div style={{borderTop:`1px solid ${C.g3}`,paddingTop:12,marginTop:4}}>
+              <div style={{fontSize:11,color:C.textoS,marginBottom:6,fontWeight:700}}>Alternativa: solo texto plano</div>
+              <textarea readOnly value={textoCompleto} style={{...inp,minHeight:100,resize:"vertical",fontFamily:"monospace",fontSize:11,marginBottom:6}}/>
+              <button onClick={()=>copiarInformeRRHH(textoCompleto)} style={{...btnS,width:"100%",padding:"9px",fontSize:12,marginBottom:14}}>
+                {informeRRHHCopiado?"✓ Copiado":"📋 Copiar solo texto"}
+              </button>
+            </div>
+
+            {/* Abrir en cliente de correo */}
+            <div style={{borderTop:`1px solid ${C.g3}`,paddingTop:14}}>
               <div style={{fontSize:11,color:C.textoS,marginBottom:8}}>Opcional: intentar abrir directo en tu correo</div>
               <Field label="Para (correo de RRHH)">
                 <input type="email" value={informeRRHHPara} onChange={e=>setInformeRRHHPara(e.target.value)} placeholder="ejemplo@empresa.com" style={inp}/>
