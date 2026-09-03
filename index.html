@@ -380,12 +380,12 @@ function App(){
     let activo=true;
     sb.from("asistencia_feriados").select("*").eq("fecha",feriadoFecha).then(({data})=>{
       if(!activo)return;
-      if(data)setAsistFeriados(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado})));
+      if(data)setAsistFeriados(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado,reportado:a.reportado})));
     });
     const ch=sb.channel("asist_feriados_"+feriadoFecha)
       .on("postgres_changes",{event:"*",schema:"public",table:"asistencia_feriados",filter:`fecha=eq.${feriadoFecha}`},async()=>{
         const {data}=await sb.from("asistencia_feriados").select("*").eq("fecha",feriadoFecha);
-        if(data)setAsistFeriados(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado})));
+        if(data)setAsistFeriados(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado,reportado:a.reportado})));
       }).subscribe();
     return()=>{activo=false;sb.removeChannel(ch);};
   },[feriadoFecha,sbOnline]);
@@ -913,27 +913,37 @@ function App(){
 
   // Informe GENERAL: junta TODOS los feriados con registros en un solo correo (no uno por fecha)
   const [informeFeriadoTodos,setInformeFeriadoTodos]=useState([]);
+  const [informeFeriadoVerTodo,setInformeFeriadoVerTodo]=useState(false); // false = solo pendientes de reportar
   async function cargarInformeFeriadoGeneral(){
     if(!sbOnline)return;
     const {data}=await sb.from("asistencia_feriados").select("*").order("fecha",{ascending:false});
-    if(data)setInformeFeriadoTodos(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado})));
+    if(data)setInformeFeriadoTodos(data.map(a=>({id:a.id,colabId:a.colab_id,fecha:a.fecha,feriadoNombre:a.feriado_nombre,entrada:a.entrada,salida:a.salida,almuerzoRestado:a.almuerzo_restado,reportado:a.reportado})));
+  }
+  async function marcarFechaComoReportada(fecha){
+    const ids=informeFeriadoTodos.filter(a=>a.fecha===fecha).map(a=>a.id);
+    if(ids.length===0)return;
+    if(sbOnline)await sb.from("asistencia_feriados").update({reportado:true}).in("id",ids);
+    setInformeFeriadoTodos(p=>p.map(a=>a.fecha===fecha?{...a,reportado:true}:a));
   }
   // Datos agrupados por fecha (para el cuadro/tabla visual del informe)
   function datosInformeFeriadoAgrupados(){
-    const conRegistro=informeFeriadoTodos.filter(a=>a.entrada||a.salida);
+    const base=informeFeriadoVerTodo?informeFeriadoTodos:informeFeriadoTodos.filter(a=>!a.reportado);
+    const conRegistro=base.filter(a=>a.entrada||a.salida);
     const porFecha={};
     conRegistro.forEach(a=>{(porFecha[a.fecha]=porFecha[a.fecha]||[]).push(a);});
     return Object.keys(porFecha).sort().reverse().map(fecha=>({
       fecha,
       nombre:porFecha[fecha][0].feriadoNombre||"(sin nombre)",
+      reportado:porFecha[fecha].every(a=>a.reportado),
       registros:porFecha[fecha].map(a=>({...a,colabNombre:colabs.find(x=>x.id===a.colabId)?.nombre||"—",horas:horasFeriado(a)}))
     }));
   }
   function generarInformeFeriadoTexto(){
-    const conRegistro=informeFeriadoTodos.filter(a=>a.entrada||a.salida);
+    const base=informeFeriadoVerTodo?informeFeriadoTodos:informeFeriadoTodos.filter(a=>!a.reportado);
+    const conRegistro=base.filter(a=>a.entrada||a.salida);
     let cuerpo=`Informe general de asistencia en feriados\n\n`;
     if(conRegistro.length===0){
-      cuerpo+="Sin registros de asistencia en feriados todavía.\n";
+      cuerpo+="Sin feriados pendientes por reportar.\n";
       return {asunto:"Informe de asistencia en feriados",cuerpo};
     }
     // Agrupar por fecha
@@ -2226,6 +2236,11 @@ function App(){
         const grupos=datosInformeFeriadoAgrupados();
         return(
           <Modal title="Informe general (todos los feriados)" onClose={()=>setShowInformeFeriado(false)}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <span style={{fontSize:11,color:C.textoM,fontWeight:700}}>{informeFeriadoVerTodo?"Mostrando todo el historial":"Mostrando solo lo pendiente por reportar"}</span>
+              <button onClick={()=>setInformeFeriadoVerTodo(v=>!v)} style={{fontSize:11,color:C.azulL,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>{informeFeriadoVerTodo?"Ver solo pendientes":"Ver historial completo"}</button>
+            </div>
+
             {grupos.length>0&&(
               <button onClick={()=>copiarInformeFeriadoConFormato(grupos,textoCompleto)} style={{...btnP,width:"100%",padding:"12px",fontSize:14,marginBottom:6}}>
                 {informeFeriadoCopiadoHTML?"✓ Copiado con formato — pegalo en el correo":"📋 Copiar tabla con formato (1 toque)"}
@@ -2234,10 +2249,15 @@ function App(){
             <div style={{fontSize:11,color:C.textoS,marginBottom:16,textAlign:"center"}}>Funciona igual en compu que en celular — no hace falta seleccionar nada, solo pegar (Ctrl+V o mantener presionado → Pegar) directo en el correo.</div>
 
             {grupos.length===0?(
-              <div style={{fontSize:12,color:C.textoS,padding:"14px 0"}}>Sin registros de asistencia en feriados todavía.</div>
+              <div style={{fontSize:12,color:C.textoS,padding:"14px 0"}}>{informeFeriadoVerTodo?"Sin registros de asistencia en feriados todavía.":"No hay feriados pendientes por reportar. 🎉"}</div>
             ):grupos.map(g=>(
-              <div key={g.fecha} style={{marginBottom:16,border:`1px solid ${C.g2}`,borderRadius:10,overflow:"hidden"}}>
-                <div style={{background:C.g2,padding:"8px 12px",fontSize:12,fontWeight:800,color:C.blanco}}>{g.fecha} — {g.nombre}</div>
+              <div key={g.fecha} style={{marginBottom:16,border:`1px solid ${C.g2}`,borderRadius:10,overflow:"hidden",opacity:g.reportado?0.55:1}}>
+                <div style={{background:C.g2,padding:"8px 12px",fontSize:12,fontWeight:800,color:C.blanco,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                  <span>{g.fecha} — {g.nombre}{g.reportado?" (ya reportado)":""}</span>
+                  {!g.reportado&&(
+                    <button onClick={()=>marcarFechaComoReportada(g.fecha)} style={{padding:"4px 9px",borderRadius:20,border:`1px solid ${C.verde}`,background:"transparent",color:C.verde,fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>✓ Marcar como reportado</button>
+                  )}
+                </div>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                   <thead>
                     <tr style={{background:C.g1}}>
