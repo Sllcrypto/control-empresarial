@@ -704,6 +704,22 @@ function App(){
     } else {
       msg+=`Todavía no tenés un horario asignado. Consultá con tu administrador.`;
     }
+
+    if(c.grupoHorario==="grupo1"||c.grupoHorario==="grupo2"||c.grupoHorario==="especial"){
+      const horasSemana=horasSemanalesColab(c,horariosConfig);
+      if(horasSemana!==null){
+        const minSemana=Math.round(horasSemana*60);
+        const cumple=Math.abs(horasSemana-48)<0.01;
+        msg+=`\n\n⏱ Horas semanales: *${fmtDuracionLarga(minSemana)}*\n`;
+        if(cumple){
+          msg+=`✅ Cumple con las 48 horas de ley.`;
+        } else if(horasSemana<48){
+          msg+=`⚠️ Faltan ${fmtDuracionLarga(Math.round((48-horasSemana)*60))} para completar las 48 horas de ley.`;
+        } else {
+          msg+=`⚠️ Supera por ${fmtDuracionLarga(Math.round((horasSemana-48)*60))} las 48 horas de ley.`;
+        }
+      }
+    }
     abrirWhatsApp(c.telefono,msg);
   }
 
