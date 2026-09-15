@@ -677,6 +677,36 @@ function App(){
     abrirWhatsApp(c.telefono,msg);
   }
 
+  function waHorario(c){
+    const nombre=c.nombre.split(" ")[0];
+    let msg=`Hola ${nombre} 👋\n\n*Tu horario*\n\n`;
+    const almuerzo=(c.almuerzoInicio&&c.almuerzoFin)?`🍽 Almuerzo: ${c.almuerzoInicio} a ${c.almuerzoFin}`:null;
+
+    if(c.grupoHorario==="grupo1"||c.grupoHorario==="grupo2"){
+      const h=horarioDeGrupo(horariosConfig,c.grupoHorario);
+      const esTemprano=h.tipo==="Temprano";
+      msg+=`Grupo: *${GRUPO_LABEL[c.grupoHorario]}*\nEsta semana te toca: *${esTemprano?"☀️ Temprano":"🌙 Tarde"}*\n\n`;
+      msg+=`Lunes a viernes: ${h.lv.entrada} a ${h.lv.salida}\nSábado: ${h.sab.entrada} a ${h.sab.salida}\n`;
+      if(almuerzo)msg+=`${almuerzo}\n`;
+      msg+=`\n⚠️ Recordá que el horario rota cada semana (temprano ↔ tarde).`;
+    } else if(c.grupoHorario==="especial"){
+      const dias=c.horarioEspecialDias||{};
+      const conHorario=DIAS_SEMANA.filter(([dk])=>dias[dk]?.entrada&&dias[dk]?.salida);
+      if(conHorario.length>0){
+        msg+=conHorario.map(([dk,label])=>`${label}: ${dias[dk].entrada} a ${dias[dk].salida}`).join("\n")+"\n";
+        if(almuerzo)msg+=`${almuerzo}\n`;
+      } else if(c.horarioEspecialDetalle){
+        msg+=`${c.horarioEspecialDetalle}\n`;
+        if(almuerzo)msg+=`${almuerzo}\n`;
+      } else {
+        msg+=`Horario fijo especial (consultá con tu administrador el detalle).\n`;
+      }
+    } else {
+      msg+=`Todavía no tenés un horario asignado. Consultá con tu administrador.`;
+    }
+    abrirWhatsApp(c.telefono,msg);
+  }
+
   // Permisos
   function calcDias(ini,fin){
     if(!ini||!fin)return 0;
@@ -1307,6 +1337,7 @@ function App(){
                                 <button onClick={()=>{const v=prompt(`Editar saldo de ${c.nombre}:\nActual: ${c.diasAcumulados} días\n\nNuevo saldo:`);if(v!==null&&!isNaN(parseInt(v))){svColabs(colabs.map(x=>x.id===c.id?{...x,diasAcumulados:parseInt(v)}:x));}}} style={{padding:"7px 12px",borderRadius:8,border:`1.5px solid ${C.amarillo}`,background:"transparent",color:C.amarillo,fontSize:12,fontWeight:700,cursor:"pointer"}}>✏️ Editar saldo</button>
                                 <button onClick={()=>waVacaciones(c)} style={{padding:"7px 12px",borderRadius:8,border:"none",background:"#25D366",color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>📲 WA Vacaciones</button>
                                 <button onClick={()=>waPermisos(c)} style={{padding:"7px 12px",borderRadius:8,border:"none",background:"#128C7E",color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>📲 WA Permisos</button>
+                                <button onClick={()=>waHorario(c)} style={{padding:"7px 12px",borderRadius:8,border:"none",background:"#075E54",color:C.blanco,fontSize:12,fontWeight:700,cursor:"pointer"}}>📲 WA Horario</button>
                               </div>
                               {/* Historial boletas */}
                               <div style={{fontSize:10,color:C.textoS,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:7}}>Boletas utilizadas</div>
